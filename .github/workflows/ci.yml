@@ -40,6 +40,7 @@ jobs:
             file
             libxdo-dev
             libssl-dev
+            libasound2-dev
             libayatana-appindicator3-dev
             librsvg2-dev
           version: 1.0
@@ -88,6 +89,7 @@ jobs:
             file
             libxdo-dev
             libssl-dev
+            libasound2-dev
             libayatana-appindicator3-dev
             librsvg2-dev
             patchelf
