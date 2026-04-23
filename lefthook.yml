@@ -1,0 +1,94 @@
+output:
+  - execution
+  - failure
+
+pre-commit:
+  jobs:
+    - name: prettier
+      run: pnpm exec prettier -u --write {staged_files}
+      stage_fixed: true
+
+    - name: eslint
+      glob: '*.{js,jsx,ts,tsx}'
+      run: pnpm exec eslint --max-warnings=0 --fix {staged_files}
+      stage_fixed: true
+
+    - name: stylelint
+      glob: '**/*.css'
+      run: pnpm exec stylelint --max-warnings=0 --fix {staged_files}
+      stage_fixed: true
+
+    - name: typecheck
+      run: pnpm exec tsc --noEmit
+
+    - name: rustfmt
+      glob: 'src-tauri/**/*.rs'
+      run: rustfmt --config-path src-tauri/rustfmt.toml {staged_files}
+      stage_fixed: true
+
+    - name: cargo-check
+      glob: 'src-tauri/**/*.rs'
+      run: >-
+        cargo check --manifest-path src-tauri/Cargo.toml --workspace
+        --all-targets --all-features
+
+    - name: cargo-clippy
+      glob: 'src-tauri/**/*.rs'
+      run: >-
+        cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
+        --all-targets --all-features -- -D warnings
+
+check:
+  jobs:
+    - name: eslint
+      run: pnpm exec eslint . --max-warnings=0
+
+    - name: stylelint
+      run: pnpm exec stylelint "**/*.css" --max-warnings=0
+
+    - name: typecheck
+      run: pnpm exec tsc --noEmit
+
+    - name: cargo-fmt
+      run: >-
+        cargo fmt --manifest-path src-tauri/Cargo.toml --all --check --
+        --config-path src-tauri/rustfmt.toml
+
+    - name: cargo-check
+      run: >-
+        cargo check --manifest-path src-tauri/Cargo.toml --workspace
+        --all-targets --all-features
+
+    - name: cargo-clippy
+      run: >-
+        cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
+        --all-targets --all-features -- -D warnings
+
+check-fix:
+  jobs:
+    - name: prettier
+      run: pnpm exec prettier -u --write .
+
+    - name: eslint
+      run: pnpm exec eslint . --max-warnings=0 --fix
+
+    - name: stylelint
+      run: pnpm exec stylelint "**/*.css" --max-warnings=0 --fix
+
+    - name: typecheck
+      run: pnpm exec tsc --noEmit
+
+    - name: cargo-fmt
+      run: >-
+        cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --config-path
+        src-tauri/rustfmt.toml
+
+    - name: cargo-check
+      run: >-
+        cargo check --manifest-path src-tauri/Cargo.toml --workspace
+        --all-targets --all-features
+
+    - name: cargo-clippy
+      run: >-
+        cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
+        --all-targets --all-features -- -D warnings
