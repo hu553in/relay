@@ -119,14 +119,7 @@ fn collect_model_candidates(
                 continue;
             }
 
-            let extension = path
-                .extension()
-                .and_then(|value| value.to_str())
-                .unwrap_or_default();
-            if !extensions
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-            {
+            if !has_supported_extension(&path, extensions) {
                 continue;
             }
 

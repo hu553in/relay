@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::domain::{
     AppPaths, AppSnapshot, DiagnosticsEntry, ListeningState, RelaySettings, SegmentRecord,
-    SegmentStatus, ServiceHealth, SystemMetrics, TemperatureReading,
+    SegmentStatus, ServiceHealth, SourceCapability, SourceState, SystemMetrics, TemperatureReading,
 };
 use crate::events::{EVENT_SETTINGS_NAVIGATE, EVENT_SNAPSHOT};
 use crate::models::{collect_models, validate_model_directory};
@@ -71,15 +71,7 @@ impl RelayApp {
         };
         snapshot.microphone.enabled = snapshot.settings.microphone_enabled;
         snapshot.system_audio.enabled = snapshot.settings.system_audio_enabled;
-        snapshot.system_audio.available = crate::platform::system_audio_supported();
-        if snapshot.system_audio.available {
-            snapshot.system_audio.detail =
-                Some("Ready to capture the default output device loopback".to_string());
-            snapshot.system_audio.health = ServiceHealth::Ready;
-        } else {
-            snapshot.system_audio.detail = Some(crate::audio::system_audio_unavailable_detail());
-            snapshot.system_audio.health = ServiceHealth::Unavailable;
-        }
+        apply_input_capabilities(&mut snapshot);
         snapshot.models = collect_models(&snapshot.settings);
 
         let app = Self {
@@ -108,16 +100,6 @@ impl RelayApp {
         Ok(app)
     }
 
-    pub(crate) fn snapshot(&self) -> AppSnapshot {
-        match self.snapshot_result() {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                tracing::warn!("failed to read relay snapshot: {error:#}");
-                AppSnapshot::default()
-            }
-        }
-    }
-
     pub(crate) fn snapshot_result(&self) -> Result<AppSnapshot> {
         self.inner
             .state
@@ -144,6 +126,7 @@ impl RelayApp {
             guard.snapshot.shortcut_warnings = shortcut_warnings;
             guard.snapshot.microphone.enabled = settings.microphone_enabled;
             guard.snapshot.system_audio.enabled = settings.system_audio_enabled;
+            apply_input_capabilities(&mut guard.snapshot);
             guard.snapshot.models = collect_models(&settings);
             guard.pipeline.is_some() || guard.snapshot.can_stop_listening()
         };
@@ -155,7 +138,7 @@ impl RelayApp {
 
         if should_restart {
             let snapshot = self.snapshot_result()?;
-            if !snapshot.has_enabled_input() || !snapshot.stt_is_ready() {
+            if !snapshot.has_available_input() || !snapshot.stt_is_ready() {
                 self.push_diagnostic(
                     "warning",
                     "Settings changed. Listening stopped because the new input or transcription configuration is not ready.",
@@ -182,7 +165,8 @@ impl RelayApp {
         let session_id = Uuid::new_v4();
         let blocker = {
             let mut guard = self.lock_state()?;
-            if !guard.snapshot.has_enabled_input() {
+            apply_input_capabilities(&mut guard.snapshot);
+            if !guard.snapshot.has_available_input() {
                 Some(StartBlocker::NoInput)
             } else if !guard.snapshot.stt_is_ready() {
                 Some(StartBlocker::SttUnavailable)
@@ -210,7 +194,7 @@ impl RelayApp {
             Some(StartBlocker::NoInput) => {
                 self.push_diagnostic(
                     "warning",
-                    "Enable microphone or system audio before starting listening.",
+                    "Enable an available microphone or system audio source before starting listening.",
                 )?;
                 return Ok(());
             }
@@ -873,6 +857,37 @@ fn diagnostic_entry(level: impl Into<String>, message: impl Into<String>) -> Dia
 fn add_diagnostic(snapshot: &mut AppSnapshot, entry: DiagnosticsEntry) {
     snapshot.diagnostics.insert(0, entry);
     snapshot.diagnostics.truncate(MAX_DIAGNOSTICS);
+}
+
+fn apply_input_capabilities(snapshot: &mut AppSnapshot) {
+    apply_source_capability(
+        &mut snapshot.microphone,
+        crate::audio::microphone_capability(),
+    );
+    apply_source_capability(
+        &mut snapshot.system_audio,
+        crate::platform::system_audio_capability(),
+    );
+}
+
+fn apply_source_capability(source: &mut SourceState, capability: SourceCapability) {
+    source.available = capability.available;
+    source.detail = Some(capability.detail);
+    if !source.enabled {
+        source.capturing = false;
+        source.input_level = Some(0);
+        source.health = if capability.available {
+            ServiceHealth::Unknown
+        } else {
+            ServiceHealth::Unavailable
+        };
+    } else if capability.available {
+        source.health = ServiceHealth::Ready;
+    } else {
+        source.capturing = false;
+        source.input_level = Some(0);
+        source.health = ServiceHealth::Unavailable;
+    }
 }
 
 fn now_ms() -> u64 {

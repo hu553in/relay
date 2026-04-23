@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, TryLockError};
 
 use anyhow::{anyhow, Context, Result};
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -103,9 +103,15 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
         };
     }
 
-    let runtime_lock = match runtime_state().lock() {
+    let runtime_lock = match runtime_state().try_lock() {
         Ok(lock) => lock,
-        Err(_) => {
+        Err(TryLockError::WouldBlock) => {
+            return TranslationHealthReport {
+                health: ServiceHealth::Degraded,
+                detail: "Translation runtime is busy finishing a previous generation".to_string(),
+            };
+        }
+        Err(TryLockError::Poisoned(_)) => {
             return TranslationHealthReport {
                 health: ServiceHealth::Unavailable,
                 detail: "llama.cpp runtime lock poisoned".to_string(),
@@ -312,4 +318,33 @@ fn decode_token_piece(model: &LlamaModel, token: LlamaToken) -> Result<String> {
     };
 
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use uuid::Uuid;
+
+    use super::{check_settings_blocking, runtime_state};
+    use crate::domain::{ServiceHealth, TranslationSettings};
+
+    #[test]
+    fn health_check_degrades_when_runtime_is_busy() {
+        let root = std::env::temp_dir().join(format!("relay-translation-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temp translation dir");
+        let _runtime_guard = runtime_state().lock().expect("lock translation runtime");
+        let settings = TranslationSettings {
+            model_path: root.to_string_lossy().to_string(),
+            selected_model: "missing.gguf".to_string(),
+            ..TranslationSettings::default()
+        };
+
+        let report = check_settings_blocking(&settings);
+
+        assert_eq!(report.health, ServiceHealth::Degraded);
+        assert!(report.detail.contains("busy"));
+
+        fs::remove_dir_all(root).ok();
+    }
 }

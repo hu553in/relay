@@ -7,9 +7,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::app::RelayApp;
-use crate::audio::{
-    system_audio_unavailable_detail, MicrophoneInputHandle, RawAudioChunk, SystemAudioInputHandle,
-};
+use crate::audio::{MicrophoneInputHandle, RawAudioChunk, SystemAudioInputHandle};
 use crate::domain::{InputSource, SegmentRecord, SegmentStatus, ServiceHealth};
 use crate::transcription::WhisperEngine;
 use crate::translation::{build_provider, TranslationRequest};
@@ -38,6 +36,8 @@ impl PipelineHandle {
         drop(self.system_audio);
         drop(self.audio_tx);
         self.audio_task.abort();
+        // In-flight llama.cpp work runs inside spawn_blocking and may finish after this abort.
+        // Session guards prevent late native results from mutating the current snapshot.
         self.translation_task.abort();
     }
 }
@@ -46,7 +46,18 @@ pub(crate) async fn start_pipeline(
     app: Arc<RelayApp>,
     session_id: Uuid,
 ) -> anyhow::Result<PipelineHandle> {
-    let settings = app.snapshot_result()?.settings;
+    let snapshot = app.snapshot_result()?;
+    let settings = snapshot.settings;
+    let microphone_available = snapshot.microphone.available;
+    let microphone_detail = snapshot
+        .microphone
+        .detail
+        .unwrap_or_else(|| "Microphone capture is unavailable".to_string());
+    let system_audio_available = snapshot.system_audio.available;
+    let system_audio_detail = snapshot
+        .system_audio
+        .detail
+        .unwrap_or_else(|| "System audio capture is unavailable".to_string());
     let engine = WhisperEngine::new(
         settings
             .selected_stt_model_path()
@@ -225,7 +236,11 @@ pub(crate) async fn start_pipeline(
         })
     };
 
-    let microphone = if settings.microphone_enabled {
+    let microphone = if settings.microphone_enabled && !microphone_available {
+        let _ = app.set_source_runtime(InputSource::Microphone, false, microphone_detail.clone());
+        let _ = app.push_diagnostic("warning", microphone_detail);
+        None
+    } else if settings.microphone_enabled {
         let handle = MicrophoneInputHandle::start(audio_tx.clone(), on_error.clone())?;
         ensure_session_current(&app, session_id, "after microphone startup")?;
         let _ = app.set_source_runtime(
@@ -244,7 +259,12 @@ pub(crate) async fn start_pipeline(
         None
     };
 
-    let system_audio = if settings.system_audio_enabled {
+    let system_audio = if settings.system_audio_enabled && !system_audio_available {
+        let _ =
+            app.set_source_runtime(InputSource::SystemAudio, false, system_audio_detail.clone());
+        let _ = app.push_diagnostic("warning", system_audio_detail);
+        None
+    } else if settings.system_audio_enabled {
         match SystemAudioInputHandle::start(audio_tx.clone(), on_error.clone()) {
             Ok(handle) => {
                 ensure_session_current(&app, session_id, "after system audio startup")?;
@@ -258,7 +278,7 @@ pub(crate) async fn start_pipeline(
             }
             Err(error) => {
                 ensure_session_current(&app, session_id, "after system audio startup")?;
-                let detail = format!("{} ({error})", system_audio_unavailable_detail());
+                let detail = format!("System audio capture failed: {error}");
                 let _ = app.set_source_runtime(InputSource::SystemAudio, false, detail.clone());
                 let _ = app.push_diagnostic("warning", detail);
                 None

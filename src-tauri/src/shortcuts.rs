@@ -107,15 +107,26 @@ pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Re
                     return;
                 }
 
+                let snapshot = match relay_for_handler.snapshot_result() {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => {
+                        let _ = relay_for_handler.push_diagnostic(
+                            "error",
+                            format!("Global shortcut snapshot failed: {error:#}"),
+                        );
+                        return;
+                    }
+                };
+
                 let result = if shortcut == &toggle_listening {
-                    match relay_for_handler.snapshot().listening_state {
+                    match snapshot.listening_state {
                         crate::domain::ListeningState::Listening => {
                             relay_for_handler.stop_listening()
                         }
                         _ => relay_for_handler.start_listening(),
                     }
                 } else if shortcut == &toggle_overlay {
-                    if relay_for_handler.snapshot().settings.overlay.visible {
+                    if snapshot.settings.overlay.visible {
                         relay_for_handler.hide_overlay()
                     } else {
                         relay_for_handler.show_overlay()

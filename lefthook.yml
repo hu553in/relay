@@ -40,7 +40,8 @@ pre-commit:
 
     - name: cargo-test
       run: >-
-        cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features
+        cargo llvm-cov --manifest-path src-tauri/Cargo.toml --workspace
+        --all-features --no-cfg-coverage --html
 
 check:
   jobs:
@@ -70,7 +71,8 @@ check:
 
     - name: cargo-test
       run: >-
-        cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features
+        cargo llvm-cov --manifest-path src-tauri/Cargo.toml --workspace
+        --all-features --no-cfg-coverage --html
 
 check-fix:
   jobs:
@@ -103,4 +105,5 @@ check-fix:
 
     - name: cargo-test
       run: >-
-        cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features
+        cargo llvm-cov --manifest-path src-tauri/Cargo.toml --workspace
+        --all-features --no-cfg-coverage --html

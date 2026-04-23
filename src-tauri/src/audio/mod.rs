@@ -6,7 +6,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig, SupportedStreamConfig};
 use tokio::sync::mpsc;
 
-use crate::domain::InputSource;
+use crate::domain::{InputSource, SourceCapability};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RawAudioChunk {
@@ -42,6 +42,20 @@ impl MicrophoneInputHandle {
     }
 }
 
+pub(crate) fn microphone_capability() -> SourceCapability {
+    let host = cpal::default_host();
+    let Some(device) = host.default_input_device() else {
+        return SourceCapability::unavailable("No input device is available");
+    };
+
+    match device.default_input_config() {
+        Ok(_) => SourceCapability::available("Ready to capture the default input device"),
+        Err(error) => {
+            SourceCapability::unavailable(format!("Default input device is unavailable: {error}"))
+        }
+    }
+}
+
 impl SystemAudioInputHandle {
     pub(crate) fn start(
         tx: mpsc::Sender<RawAudioChunk>,
@@ -60,11 +74,6 @@ impl SystemAudioInputHandle {
             .context("start system audio loopback stream")?;
         Ok(Self { _stream: stream })
     }
-}
-
-pub(crate) fn system_audio_unavailable_detail() -> String {
-    "System audio capture needs loopback support on the default output device. Relay degrades to microphone-only when that path is unavailable."
-        .to_string()
 }
 
 fn build_stream(

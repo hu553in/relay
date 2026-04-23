@@ -51,6 +51,28 @@ pub struct SourceState {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceCapability {
+    pub(crate) available: bool,
+    pub(crate) detail: String,
+}
+
+impl SourceCapability {
+    pub(crate) fn available(detail: impl Into<String>) -> Self {
+        Self {
+            available: true,
+            detail: detail.into(),
+        }
+    }
+
+    pub(crate) fn unavailable(detail: impl Into<String>) -> Self {
+        Self {
+            available: false,
+            detail: detail.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelKind {
@@ -225,8 +247,9 @@ pub struct AppSnapshot {
 }
 
 impl AppSnapshot {
-    pub fn has_enabled_input(&self) -> bool {
-        self.settings.microphone_enabled || self.settings.system_audio_enabled
+    pub fn has_available_input(&self) -> bool {
+        (self.microphone.enabled && self.microphone.available)
+            || (self.system_audio.enabled && self.system_audio.available)
     }
 
     pub fn stt_is_ready(&self) -> bool {
@@ -237,7 +260,7 @@ impl AppSnapshot {
         matches!(
             self.listening_state,
             ListeningState::Idle | ListeningState::Error
-        ) && self.has_enabled_input()
+        ) && self.has_available_input()
             && self.stt_is_ready()
     }
 
@@ -397,7 +420,9 @@ pub(crate) fn normalize_model_reference(value: &str) -> Option<String> {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{normalize_model_location, resolve_selected_model_path};
+    use super::{
+        normalize_model_location, resolve_selected_model_path, AppSnapshot, ServiceHealth,
+    };
 
     #[test]
     fn selected_model_path_stays_under_models_directory() {
@@ -442,5 +467,35 @@ mod tests {
 
         assert_eq!(directory, "models");
         assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn startability_requires_enabled_and_available_input() {
+        let mut snapshot = AppSnapshot {
+            stt_health: ServiceHealth::Ready,
+            ..Default::default()
+        };
+
+        snapshot.settings.microphone_enabled = true;
+        snapshot.microphone.enabled = true;
+        snapshot.microphone.available = false;
+        snapshot.settings.system_audio_enabled = false;
+        snapshot.system_audio.enabled = false;
+
+        assert!(!snapshot.has_available_input());
+        assert!(!snapshot.can_start_listening());
+
+        snapshot.settings.microphone_enabled = false;
+        snapshot.microphone.enabled = false;
+        snapshot.settings.system_audio_enabled = true;
+        snapshot.system_audio.enabled = true;
+        snapshot.system_audio.available = false;
+
+        assert!(!snapshot.has_available_input());
+        assert!(!snapshot.can_start_listening());
+
+        snapshot.system_audio.available = true;
+        assert!(snapshot.has_available_input());
+        assert!(snapshot.can_start_listening());
     }
 }
