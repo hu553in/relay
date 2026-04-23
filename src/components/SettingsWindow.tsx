@@ -8,7 +8,7 @@ import {
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openPath, openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
+import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   AudioLines,
   Captions,
@@ -623,8 +623,8 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       label='Open config folder'
                       icon={<FolderOpen size={14} />}
                       onClick={() => {
-                        if (appPaths?.configDir) {
-                          void runWithErrorToast(() => openPath(appPaths.configDir));
+                        if (appPaths?.configFile) {
+                          void runWithErrorToast(() => revealItemInDir(appPaths.configFile));
                         }
                       }}
                     />

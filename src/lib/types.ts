@@ -90,7 +90,6 @@ export interface AppSnapshot {
 
 export interface AppPaths {
   configFile: string;
-  configDir: string;
   diagnosticsLogFile: string;
 }
 

@@ -253,8 +253,6 @@ impl AppSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct AppPaths {
     pub config_file: String,
-    pub config_dir: String,
-    pub logs_dir: String,
     pub diagnostics_log_file: String,
 }
 

@@ -357,13 +357,6 @@ impl RelayApp {
     pub(crate) fn app_paths(&self) -> AppPaths {
         AppPaths {
             config_file: self.inner.settings.path().to_string_lossy().to_string(),
-            config_dir: self
-                .inner
-                .settings
-                .config_dir()
-                .to_string_lossy()
-                .to_string(),
-            logs_dir: self.inner.settings.logs_dir().to_string_lossy().to_string(),
             diagnostics_log_file: self
                 .inner
                 .settings
