@@ -30,6 +30,19 @@ jobs:
         with:
           rust-src-dir: src-tauri
           components: rustfmt, clippy
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: >-
+            libwebkit2gtk-4.1-dev
+            build-essential
+            curl
+            wget
+            file
+            libxdo-dev
+            libssl-dev
+            libayatana-appindicator3-dev
+            librsvg2-dev
+          version: 1.0
       - run: pnpm check
 
   release:
@@ -65,9 +78,20 @@ jobs:
           rust-src-dir: src-tauri
           target: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: >-
+            libwebkit2gtk-4.1-dev
+            build-essential
+            curl
+            wget
+            file
+            libxdo-dev
+            libssl-dev
+            libayatana-appindicator3-dev
+            librsvg2-dev
+            patchelf
+          version: 1.0
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
