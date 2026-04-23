@@ -1,9 +1,16 @@
 #[cfg(target_os = "macos")]
-pub mod macos;
+mod macos;
 
 #[cfg(not(target_os = "macos"))]
-pub mod macos {
-    pub fn system_audio_supported() -> bool {
-        false
-    }
-}
+mod default;
+
+#[cfg(target_os = "macos")]
+use macos as platform_impl;
+
+#[cfg(not(target_os = "macos"))]
+use default as platform_impl;
+
+pub(crate) use platform_impl::{
+    apply_main_window_platform_behavior, apply_overlay_platform_behavior,
+    apply_settings_window_platform_behavior, configure_app_policy, system_audio_supported,
+};

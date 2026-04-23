@@ -661,7 +661,6 @@ function settingsEqual(left: RelaySettings, right: RelaySettings): boolean {
     left.translation.targetLanguage === right.translation.targetLanguage &&
     left.translation.maxTokens === right.translation.maxTokens &&
     left.overlay.visible === right.overlay.visible &&
-    left.overlay.compactMode === right.overlay.compactMode &&
     left.overlay.alwaysOnTop === right.overlay.alwaysOnTop &&
     left.shortcuts.toggleListening === right.shortcuts.toggleListening &&
     left.shortcuts.toggleOverlay === right.shortcuts.toggleOverlay

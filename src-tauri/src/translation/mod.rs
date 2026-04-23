@@ -14,103 +14,116 @@ use llama_cpp_2::token::LlamaToken;
 use serde_json::json;
 
 use crate::domain::{ServiceHealth, TranslationSettings};
+use crate::models::{validate_model_file_extension, TRANSLATION_MODEL_EXTENSIONS};
 
 #[derive(Debug, Clone)]
-pub struct TranslationHealthReport {
-    pub health: ServiceHealth,
-    pub detail: String,
+pub(crate) struct TranslationHealthReport {
+    pub(crate) health: ServiceHealth,
+    pub(crate) detail: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct TranslationRequest {
-    pub text: String,
-    pub target_language: String,
+pub(crate) struct TranslationRequest {
+    pub(crate) text: String,
+    pub(crate) target_language: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct LlamaCppTranslationProvider {
+pub(crate) struct TranslationProvider {
     settings: TranslationSettings,
 }
 
-impl LlamaCppTranslationProvider {
-    pub fn new(settings: TranslationSettings) -> Self {
+impl TranslationProvider {
+    fn new(settings: TranslationSettings) -> Self {
         Self { settings }
     }
 
-    async fn translate(&self, request: TranslationRequest) -> Result<String> {
-        let runtime_lock = runtime_state()
-            .lock()
-            .map_err(|_| anyhow!("llama.cpp runtime lock poisoned"))?;
-        let mut runtime = runtime_lock;
-        let runtime = runtime.ensure_loaded(&self.settings)?;
-        let prompt = build_translation_prompt(runtime.model, &request)?;
-        generate_translation(runtime, &self.settings, &prompt)
+    pub(crate) async fn translate(&self, request: TranslationRequest) -> Result<String> {
+        let settings = self.settings.clone();
+        tokio::task::spawn_blocking(move || translate_blocking(settings, request))
+            .await
+            .context("join llama.cpp translation worker")?
     }
 
-    async fn check(&self) -> TranslationHealthReport {
-        if self.settings.model_path.trim().is_empty() {
-            return TranslationHealthReport {
-                health: ServiceHealth::Unavailable,
-                detail: "Translation model directory is empty".to_string(),
-            };
-        }
-
-        let path = Path::new(self.settings.model_path.trim());
-        if !path.exists() {
-            return TranslationHealthReport {
-                health: ServiceHealth::Unavailable,
-                detail: format!(
-                    "Translation model directory is missing at {}",
-                    path.display()
-                ),
-            };
-        }
-
-        let runtime_lock = match runtime_state().lock() {
-            Ok(lock) => lock,
-            Err(_) => {
-                return TranslationHealthReport {
-                    health: ServiceHealth::Unavailable,
-                    detail: "llama.cpp runtime lock poisoned".to_string(),
-                };
-            }
-        };
-
-        let mut runtime = runtime_lock;
-        match runtime.ensure_loaded(&self.settings) {
-            Ok(runtime) => TranslationHealthReport {
-                health: ServiceHealth::Ready,
-                detail: format!("Loaded local translation model {}", runtime.model_path),
-            },
+    pub(crate) async fn check(&self) -> TranslationHealthReport {
+        let settings = self.settings.clone();
+        match tokio::task::spawn_blocking(move || check_settings_blocking(&settings)).await {
+            Ok(report) => report,
             Err(error) => TranslationHealthReport {
-                health: ServiceHealth::Degraded,
-                detail: format!("Failed to load local translation model: {error}"),
+                health: ServiceHealth::Unavailable,
+                detail: format!("llama.cpp health worker failed: {error}"),
             },
         }
     }
-}
 
-#[derive(Debug, Clone)]
-pub enum TranslationProvider {
-    LlamaCpp(LlamaCppTranslationProvider),
-}
-
-impl TranslationProvider {
-    pub async fn translate(&self, request: TranslationRequest) -> Result<String> {
-        match self {
-            Self::LlamaCpp(provider) => provider.translate(request).await,
-        }
-    }
-
-    pub async fn check(&self) -> TranslationHealthReport {
-        match self {
-            Self::LlamaCpp(provider) => provider.check().await,
-        }
+    pub(crate) fn check_blocking(&self) -> TranslationHealthReport {
+        check_settings_blocking(&self.settings)
     }
 }
 
-pub fn build_provider(settings: &TranslationSettings) -> TranslationProvider {
-    TranslationProvider::LlamaCpp(LlamaCppTranslationProvider::new(settings.clone()))
+pub(crate) fn build_provider(settings: &TranslationSettings) -> TranslationProvider {
+    TranslationProvider::new(settings.clone())
+}
+
+fn translate_blocking(
+    settings: TranslationSettings,
+    request: TranslationRequest,
+) -> Result<String> {
+    let runtime_lock = runtime_state()
+        .lock()
+        .map_err(|_| anyhow!("llama.cpp runtime lock poisoned"))?;
+    let mut runtime = runtime_lock;
+    let runtime = runtime.ensure_loaded(&settings)?;
+    let prompt = build_translation_prompt(runtime.model, &request)?;
+    generate_translation(runtime, &settings, &prompt)
+}
+
+fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthReport {
+    if settings.model_path.trim().is_empty() {
+        return TranslationHealthReport {
+            health: ServiceHealth::Unavailable,
+            detail: "Translation model directory is empty".to_string(),
+        };
+    }
+
+    let path = Path::new(settings.model_path.trim());
+    if !path.exists() {
+        return TranslationHealthReport {
+            health: ServiceHealth::Unavailable,
+            detail: format!(
+                "Translation model directory is missing at {}",
+                path.display()
+            ),
+        };
+    }
+    if !path.is_dir() {
+        return TranslationHealthReport {
+            health: ServiceHealth::Unavailable,
+            detail: "Translation model directory must point to a folder".to_string(),
+        };
+    }
+
+    let runtime_lock = match runtime_state().lock() {
+        Ok(lock) => lock,
+        Err(_) => {
+            return TranslationHealthReport {
+                health: ServiceHealth::Unavailable,
+                detail: "llama.cpp runtime lock poisoned".to_string(),
+            };
+        }
+    };
+
+    let mut runtime = runtime_lock;
+    match runtime.ensure_loaded(settings) {
+        Ok(runtime) => TranslationHealthReport {
+            health: ServiceHealth::Ready,
+            detail: format!("Loaded local translation model {}", runtime.model_path),
+        },
+        Err(error) => TranslationHealthReport {
+            health: ServiceHealth::Degraded,
+            detail: format!("Failed to load local translation model: {error}"),
+        },
+    }
 }
 
 #[derive(Debug)]
@@ -134,6 +147,8 @@ impl LlamaRuntimeState {
                 path.display()
             ));
         }
+        validate_model_file_extension(&path, "Translation", TRANSLATION_MODEL_EXTENSIONS)
+            .map_err(|error| anyhow!(error))?;
 
         let path_string = path.to_string_lossy().to_string();
 
@@ -145,7 +160,10 @@ impl LlamaRuntimeState {
             self.model_path.as_deref() != Some(path_string.as_str()) || self.model.is_none();
         if needs_reload {
             let params = LlamaModelParams::default().with_n_gpu_layers(u32::MAX);
-            let backend = self.backend.as_ref().expect("backend initialized");
+            let backend = self
+                .backend
+                .as_ref()
+                .ok_or_else(|| anyhow!("llama.cpp backend was not initialized"))?;
             let model = LlamaModel::load_from_file(backend, path.as_path(), &params)
                 .with_context(|| format!("load local translation model {}", path.display()))?;
             self.model = Some(model);
@@ -153,9 +171,18 @@ impl LlamaRuntimeState {
         }
 
         Ok(LlamaRuntimeRef {
-            backend: self.backend.as_ref().expect("backend initialized"),
-            model: self.model.as_ref().expect("model initialized"),
-            model_path: self.model_path.as_deref().unwrap_or_default(),
+            backend: self
+                .backend
+                .as_ref()
+                .ok_or_else(|| anyhow!("llama.cpp backend was not initialized"))?,
+            model: self
+                .model
+                .as_ref()
+                .ok_or_else(|| anyhow!("llama.cpp model was not loaded"))?,
+            model_path: self
+                .model_path
+                .as_deref()
+                .ok_or_else(|| anyhow!("llama.cpp model path was not recorded"))?,
         })
     }
 }
@@ -271,16 +298,16 @@ fn generate_translation(
 fn decode_token_piece(model: &LlamaModel, token: LlamaToken) -> Result<String> {
     let bytes = match model.token_to_piece_bytes(token, 8, true, None) {
         Ok(bytes) => bytes,
-        Err(llama_cpp_2::TokenToStringError::InsufficientBufferSpace(size)) => model
-            .token_to_piece_bytes(
-                token,
-                (-size)
-                    .try_into()
-                    .expect("llama.cpp returned a positive required buffer size"),
-                true,
-                None,
-            )
-            .context("decode translation token with resized buffer")?,
+        Err(llama_cpp_2::TokenToStringError::InsufficientBufferSpace(size)) => {
+            let buffer_size = size
+                .checked_abs()
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(8)
+                .max(8);
+            model
+                .token_to_piece_bytes(token, buffer_size, true, None)
+                .context("decode translation token with resized buffer")?
+        }
         Err(error) => return Err(anyhow!(error)).context("decode translation token"),
     };
 

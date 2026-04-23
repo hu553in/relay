@@ -5,7 +5,7 @@ use crate::domain::{AppPaths, AppSnapshot, RelaySettings, SystemMetrics};
 
 #[tauri::command]
 pub fn get_snapshot(app: State<'_, RelayApp>) -> Result<AppSnapshot, String> {
-    Ok(app.snapshot())
+    app.snapshot_result().map_err(|error| error.to_string())
 }
 
 #[tauri::command]

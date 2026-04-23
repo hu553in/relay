@@ -4,7 +4,6 @@ const HEALTH_LABELS: Record<ServiceHealth, string> = {
   ready: 'Ready',
   degraded: 'Degraded',
   unavailable: 'Unavailable',
-  busy: 'Busy',
   unknown: 'Unknown',
 };
 

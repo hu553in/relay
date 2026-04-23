@@ -10,7 +10,7 @@ use crate::app::RelayApp;
 use crate::audio::{
     system_audio_unavailable_detail, MicrophoneInputHandle, RawAudioChunk, SystemAudioInputHandle,
 };
-use crate::domain::{InputSource, ListeningState, SegmentRecord, SegmentStatus, ServiceHealth};
+use crate::domain::{InputSource, SegmentRecord, SegmentStatus, ServiceHealth};
 use crate::transcription::WhisperEngine;
 use crate::translation::{build_provider, TranslationRequest};
 
@@ -21,9 +21,11 @@ const SILENCE_RMS_THRESHOLD: f32 = 0.008;
 const MIN_SENTENCE_WORDS_ON_SILENCE: usize = 4;
 const MIN_SENTENCE_WORDS_ON_TIMEOUT: usize = 6;
 const MAX_PENDING_SENTENCE_MS: u64 = 9_000;
+const AUDIO_QUEUE_CAPACITY: usize = 24;
+const TRANSLATION_QUEUE_CAPACITY: usize = 64;
 
-pub struct PipelineHandle {
-    audio_tx: mpsc::UnboundedSender<RawAudioChunk>,
+pub(crate) struct PipelineHandle {
+    audio_tx: mpsc::Sender<RawAudioChunk>,
     audio_task: JoinHandle<()>,
     translation_task: JoinHandle<()>,
     microphone: Option<MicrophoneInputHandle>,
@@ -31,7 +33,7 @@ pub struct PipelineHandle {
 }
 
 impl PipelineHandle {
-    pub fn stop(self) {
+    pub(crate) fn stop(self) {
         drop(self.microphone);
         drop(self.system_audio);
         drop(self.audio_tx);
@@ -40,11 +42,11 @@ impl PipelineHandle {
     }
 }
 
-pub async fn start_pipeline(
+pub(crate) async fn start_pipeline(
     app: Arc<RelayApp>,
     session_id: Uuid,
 ) -> anyhow::Result<PipelineHandle> {
-    let settings = app.snapshot().settings;
+    let settings = app.snapshot_result()?.settings;
     let engine = WhisperEngine::new(
         settings
             .selected_stt_model_path()
@@ -54,14 +56,18 @@ pub async fn start_pipeline(
     let provider = build_provider(&settings.translation);
     let provider = Arc::from(provider);
 
+    ensure_session_current(&app, session_id, "before model validation")?;
+
     if !engine.is_configured() {
         app.update_stt_health(
             ServiceHealth::Degraded,
             "Whisper model is not configured. Set a local model directory and choose a .bin model in Settings."
                 .to_string(),
         )?;
+        anyhow::bail!("Whisper model is not configured");
     } else if let Err(error) = engine.ensure_ready() {
         app.update_stt_health(ServiceHealth::Degraded, error.to_string())?;
+        anyhow::bail!("Whisper model is not ready: {error:#}");
     } else {
         app.update_stt_health(
             ServiceHealth::Ready,
@@ -69,16 +75,23 @@ pub async fn start_pipeline(
         )?;
     }
 
+    ensure_session_current(&app, session_id, "before translation validation")?;
+
     let check = provider.check().await;
+    let translation_ready = matches!(check.health, ServiceHealth::Ready);
     app.update_translation_health(check.health, check.detail)?;
 
-    let (audio_tx, mut audio_rx) = mpsc::unbounded_channel::<RawAudioChunk>();
-    let (translation_tx, mut translation_rx) = mpsc::unbounded_channel::<(Uuid, String)>();
+    ensure_session_current(&app, session_id, "before capture startup")?;
+
+    let (audio_tx, mut audio_rx) = mpsc::channel::<RawAudioChunk>(AUDIO_QUEUE_CAPACITY);
+    let (translation_tx, mut translation_rx) =
+        mpsc::channel::<(Uuid, String)>(TRANSLATION_QUEUE_CAPACITY);
 
     let processor_app = Arc::clone(&app);
     let translation_app = Arc::clone(&app);
     let translation_target = settings.translation.target_language.clone();
 
+    let audio_session_id = session_id;
     let audio_task = tokio::spawn(async move {
         let mut chunkers = HashMap::from([
             (InputSource::Microphone, StreamingChunker::new()),
@@ -90,6 +103,10 @@ pub async fn start_pipeline(
         ]);
 
         while let Some(chunk) = audio_rx.recv().await {
+            if !processor_app.is_session_current(audio_session_id) {
+                break;
+            }
+
             let _ = processor_app
                 .update_source_level(chunk.source, normalize_level(rms(&chunk.samples)));
             let Some(chunker) = chunkers.get_mut(&chunk.source) else {
@@ -101,15 +118,35 @@ pub async fn start_pipeline(
                     continue;
                 }
 
-                let transcript = match engine.transcribe(&window.samples) {
-                    Ok(text) => text,
-                    Err(error) => {
+                let captured_at_ms = window.captured_at_ms;
+                let is_low_energy = window.rms <= SILENCE_RMS_THRESHOLD;
+                let samples = window.samples;
+                let engine_for_window = engine.clone();
+                let transcript = match tokio::task::spawn_blocking(move || {
+                    engine_for_window.transcribe(&samples)
+                })
+                .await
+                {
+                    Ok(Ok(text)) => text,
+                    Ok(Err(error)) => {
                         warn!("stt failed: {error:#}");
                         let _ = processor_app
                             .update_stt_health(ServiceHealth::Degraded, error.to_string());
                         continue;
                     }
+                    Err(error) => {
+                        warn!("stt worker failed: {error:#}");
+                        let _ = processor_app.update_stt_health(
+                            ServiceHealth::Degraded,
+                            format!("Whisper worker failed: {error}"),
+                        );
+                        continue;
+                    }
                 };
+
+                if !processor_app.is_session_current(audio_session_id) {
+                    break;
+                }
 
                 let cleaned = transcript.trim().to_string();
                 if cleaned.is_empty() {
@@ -120,9 +157,7 @@ pub async fn start_pipeline(
                     continue;
                 };
 
-                let is_low_energy = window.rms <= SILENCE_RMS_THRESHOLD;
-                let Some(finalized) =
-                    assembler.ingest(&cleaned, window.captured_at_ms, is_low_energy)
+                let Some(finalized) = assembler.ingest(&cleaned, captured_at_ms, is_low_energy)
                 else {
                     continue;
                 };
@@ -130,20 +165,36 @@ pub async fn start_pipeline(
                 let segment = SegmentRecord {
                     id: Uuid::new_v4(),
                     source: chunk.source,
-                    created_at_ms: window.captured_at_ms,
+                    created_at_ms: captured_at_ms,
                     transcript: finalized.clone(),
                     translation: None,
-                    status: SegmentStatus::Translating,
+                    status: if translation_ready {
+                        SegmentStatus::Translating
+                    } else {
+                        SegmentStatus::Transcribed
+                    },
                 };
                 let segment_id = segment.id;
                 let _ = processor_app.push_segment(segment);
-                let _ = translation_tx.send((segment_id, finalized));
+                if translation_ready && translation_tx.try_send((segment_id, finalized)).is_err() {
+                    let _ = processor_app.update_segment_translation(
+                        segment_id,
+                        Err(anyhow::anyhow!(
+                            "Translation queue is full; segment was dropped before translation"
+                        )),
+                    );
+                }
             }
         }
     });
 
+    let translation_session_id = session_id;
     let translation_task = tokio::spawn(async move {
         while let Some((segment_id, text)) = translation_rx.recv().await {
+            if !translation_app.is_session_current(translation_session_id) {
+                break;
+            }
+
             let result = provider
                 .translate(TranslationRequest {
                     text,
@@ -151,13 +202,21 @@ pub async fn start_pipeline(
                 })
                 .await;
 
+            if !translation_app.is_session_current(translation_session_id) {
+                break;
+            }
+
             let _ = translation_app.update_segment_translation(segment_id, result);
         }
     });
 
     let on_error = {
         let app = Arc::clone(&app);
+        let error_session_id = session_id;
         Arc::new(move |source: InputSource, message: String| {
+            if !app.is_session_current(error_session_id) {
+                return;
+            }
             let _ = app.push_diagnostic("warning", message);
             let _ = app.mark_source_error(
                 source,
@@ -168,6 +227,7 @@ pub async fn start_pipeline(
 
     let microphone = if settings.microphone_enabled {
         let handle = MicrophoneInputHandle::start(audio_tx.clone(), on_error.clone())?;
+        ensure_session_current(&app, session_id, "after microphone startup")?;
         let _ = app.set_source_runtime(
             InputSource::Microphone,
             true,
@@ -187,6 +247,7 @@ pub async fn start_pipeline(
     let system_audio = if settings.system_audio_enabled {
         match SystemAudioInputHandle::start(audio_tx.clone(), on_error.clone()) {
             Ok(handle) => {
+                ensure_session_current(&app, session_id, "after system audio startup")?;
                 let _ = app.set_source_runtime(
                     InputSource::SystemAudio,
                     true,
@@ -196,6 +257,7 @@ pub async fn start_pipeline(
                 Some(handle)
             }
             Err(error) => {
+                ensure_session_current(&app, session_id, "after system audio startup")?;
                 let detail = format!("{} ({error})", system_audio_unavailable_detail());
                 let _ = app.set_source_runtime(InputSource::SystemAudio, false, detail.clone());
                 let _ = app.push_diagnostic("warning", detail);
@@ -219,16 +281,30 @@ pub async fn start_pipeline(
         ));
     }
 
-    app.set_listening_state(ListeningState::Listening, Some(session_id))?;
-    info!("pipeline started for session {session_id}");
-
-    Ok(PipelineHandle {
+    let handle = PipelineHandle {
         audio_tx,
         audio_task,
         translation_task,
         microphone,
         system_audio,
-    })
+    };
+
+    if !app.activate_pipeline_session(session_id)? {
+        handle.stop();
+        anyhow::bail!("Pipeline start was superseded before activation");
+    }
+
+    info!("pipeline started for session {session_id}");
+
+    Ok(handle)
+}
+
+fn ensure_session_current(app: &RelayApp, session_id: Uuid, stage: &str) -> anyhow::Result<()> {
+    if app.is_session_current(session_id) {
+        Ok(())
+    } else {
+        anyhow::bail!("Pipeline start was superseded {stage}");
+    }
 }
 
 fn normalize_level(rms: f32) -> f32 {
@@ -415,4 +491,33 @@ fn resample_linear(samples: &[f32], input_rate: u32, output_rate: u32) -> Vec<f3
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{merge_transcripts, TranscriptAssembler};
+
+    #[test]
+    fn merges_overlapping_transcript_fragments() {
+        let merged = merge_transcripts(
+            "video on YouTube? Go to the comments",
+            "Go to the comments section and share",
+        );
+
+        assert_eq!(
+            merged,
+            "video on YouTube? Go to the comments section and share"
+        );
+    }
+
+    #[test]
+    fn assembler_waits_for_sentence_boundary() {
+        let mut assembler = TranscriptAssembler::default();
+
+        assert_eq!(assembler.ingest("Try to write", 1_000, false), None);
+        assert_eq!(
+            assembler.ingest("Try to write at least one comment", 2_000, true),
+            Some("Try to write at least one comment".to_string())
+        );
+    }
 }

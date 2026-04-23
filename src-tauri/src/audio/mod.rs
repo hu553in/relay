@@ -4,28 +4,29 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig, SupportedStreamConfig};
+use tokio::sync::mpsc;
 
 use crate::domain::InputSource;
 
 #[derive(Debug, Clone)]
-pub struct RawAudioChunk {
-    pub source: InputSource,
-    pub captured_at_ms: u64,
-    pub sample_rate: u32,
-    pub samples: Vec<f32>,
+pub(crate) struct RawAudioChunk {
+    pub(crate) source: InputSource,
+    pub(crate) captured_at_ms: u64,
+    pub(crate) sample_rate: u32,
+    pub(crate) samples: Vec<f32>,
 }
 
-pub struct MicrophoneInputHandle {
+pub(crate) struct MicrophoneInputHandle {
     _stream: Stream,
 }
 
-pub struct SystemAudioInputHandle {
+pub(crate) struct SystemAudioInputHandle {
     _stream: Stream,
 }
 
 impl MicrophoneInputHandle {
-    pub fn start(
-        tx: tokio::sync::mpsc::UnboundedSender<RawAudioChunk>,
+    pub(crate) fn start(
+        tx: mpsc::Sender<RawAudioChunk>,
         on_error: Arc<dyn Fn(InputSource, String) + Send + Sync>,
     ) -> Result<Self> {
         let host = cpal::default_host();
@@ -42,8 +43,8 @@ impl MicrophoneInputHandle {
 }
 
 impl SystemAudioInputHandle {
-    pub fn start(
-        tx: tokio::sync::mpsc::UnboundedSender<RawAudioChunk>,
+    pub(crate) fn start(
+        tx: mpsc::Sender<RawAudioChunk>,
         on_error: Arc<dyn Fn(InputSource, String) + Send + Sync>,
     ) -> Result<Self> {
         let host = cpal::default_host();
@@ -61,19 +62,7 @@ impl SystemAudioInputHandle {
     }
 }
 
-pub fn system_audio_supported() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        cpal::default_host().default_output_device().is_some()
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        false
-    }
-}
-
-pub fn system_audio_unavailable_detail() -> String {
+pub(crate) fn system_audio_unavailable_detail() -> String {
     "System audio capture needs loopback support on the default output device. Relay degrades to microphone-only when that path is unavailable."
         .to_string()
 }
@@ -82,7 +71,7 @@ fn build_stream(
     source: InputSource,
     device: Device,
     config: SupportedStreamConfig,
-    tx: tokio::sync::mpsc::UnboundedSender<RawAudioChunk>,
+    tx: mpsc::Sender<RawAudioChunk>,
     on_error: Arc<dyn Fn(InputSource, String) + Send + Sync>,
 ) -> Result<Stream> {
     let channels = config.channels() as usize;
@@ -108,12 +97,12 @@ fn build_stream(
                         sample_rate,
                         samples: fold_to_mono_f32(data, channels),
                     };
-                    let _ = tx.send(chunk);
+                    let _ = tx.try_send(chunk);
                 },
                 err_handler,
                 None,
             )
-            .context("build f32 microphone stream"),
+            .with_context(|| format!("build f32 {source_label} stream")),
         SampleFormat::I16 => {
             let tx = tx.clone();
             let on_error = on_error.clone();
@@ -127,12 +116,12 @@ fn build_stream(
                             sample_rate,
                             samples: fold_to_mono_i16(data, channels),
                         };
-                        let _ = tx.send(chunk);
+                        let _ = tx.try_send(chunk);
                     },
                     move |error| on_error(source, format!("{source_label} stream failed: {error}")),
                     None,
                 )
-                .context("build i16 microphone stream")
+                .with_context(|| format!("build i16 {source_label} stream"))
         }
         SampleFormat::U16 => {
             let tx = tx.clone();
@@ -147,14 +136,16 @@ fn build_stream(
                             sample_rate,
                             samples: fold_to_mono_u16(data, channels),
                         };
-                        let _ = tx.send(chunk);
+                        let _ = tx.try_send(chunk);
                     },
                     move |error| on_error(source, format!("{source_label} stream failed: {error}")),
                     None,
                 )
-                .context("build u16 microphone stream")
+                .with_context(|| format!("build u16 {source_label} stream"))
         }
-        format => Err(anyhow!("Unsupported microphone sample format: {format:?}")),
+        format => Err(anyhow!(
+            "Unsupported {source_label} sample format: {format:?}"
+        )),
     }
 }
 

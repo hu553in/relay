@@ -1,21 +1,20 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use sysinfo::{get_current_pid, Components, ProcessRefreshKind, ProcessesToUpdate, System};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
 use crate::domain::{
-    AppPaths, AppSnapshot, DiagnosticsEntry, ListeningState, ModelKind, ModelRecord, ModelState,
-    RelaySettings, SegmentRecord, SegmentStatus, ServiceHealth, SystemMetrics, TemperatureReading,
+    AppPaths, AppSnapshot, DiagnosticsEntry, ListeningState, RelaySettings, SegmentRecord,
+    SegmentStatus, ServiceHealth, SystemMetrics, TemperatureReading,
 };
 use crate::events::{EVENT_SETTINGS_NAVIGATE, EVENT_SNAPSHOT};
+use crate::models::{collect_models, validate_model_directory};
 use crate::pipeline::{start_pipeline, PipelineHandle};
 use crate::settings::SettingsStore;
 use crate::shortcuts::normalize_shortcuts;
@@ -25,7 +24,7 @@ use crate::translation::build_provider;
 const MAX_SEGMENTS: usize = 120;
 const MAX_DIAGNOSTICS: usize = 60;
 
-pub fn init_logging() {
+pub(crate) fn init_logging() {
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_env_filter(EnvFilter::from_default_env())
@@ -34,7 +33,7 @@ pub fn init_logging() {
 }
 
 #[derive(Clone)]
-pub struct RelayApp {
+pub(crate) struct RelayApp {
     inner: Arc<RelayAppInner>,
 }
 
@@ -59,9 +58,10 @@ struct SystemProbe {
 }
 
 impl RelayApp {
-    pub fn bootstrap(app_handle: AppHandle) -> Result<Self> {
+    pub(crate) fn bootstrap(app_handle: AppHandle) -> Result<Self> {
         let settings_store = SettingsStore::new();
-        let mut settings = settings_store.load();
+        let loaded_settings = settings_store.load();
+        let mut settings = loaded_settings.settings;
         settings.normalize_model_locations();
         let shortcut_warnings = normalize_shortcuts(&mut settings.shortcuts);
         let mut snapshot = AppSnapshot {
@@ -71,7 +71,7 @@ impl RelayApp {
         };
         snapshot.microphone.enabled = snapshot.settings.microphone_enabled;
         snapshot.system_audio.enabled = snapshot.settings.system_audio_enabled;
-        snapshot.system_audio.available = crate::platform::macos::system_audio_supported();
+        snapshot.system_audio.available = crate::platform::system_audio_supported();
         if snapshot.system_audio.available {
             snapshot.system_audio.detail =
                 Some("Ready to capture the default output device loopback".to_string());
@@ -99,26 +99,41 @@ impl RelayApp {
             app.persist_settings()?;
         }
 
+        if let Some(warning) = loaded_settings.warning {
+            app.push_diagnostic("warning", warning)?;
+        }
+
         app.refresh_runtime_healths()?;
 
         Ok(app)
     }
 
-    pub fn snapshot(&self) -> AppSnapshot {
+    pub(crate) fn snapshot(&self) -> AppSnapshot {
+        match self.snapshot_result() {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::warn!("failed to read relay snapshot: {error:#}");
+                AppSnapshot::default()
+            }
+        }
+    }
+
+    pub(crate) fn snapshot_result(&self) -> Result<AppSnapshot> {
         self.inner
             .state
             .lock()
             .map(|guard| guard.snapshot.clone())
-            .unwrap_or_default()
+            .map_err(|_| anyhow!("relay state lock poisoned"))
     }
 
-    pub fn emit_snapshot(&self) -> Result<()> {
-        let snapshot = self.snapshot();
+    pub(crate) fn emit_snapshot(&self) -> Result<()> {
+        let snapshot = self.snapshot_result()?;
+        crate::tray::sync(&self.inner.app_handle, &snapshot);
         self.inner.app_handle.emit(EVENT_SNAPSHOT, snapshot)?;
         Ok(())
     }
 
-    pub fn update_settings(&self, settings: RelaySettings) -> Result<AppSnapshot> {
+    pub(crate) fn update_settings(&self, settings: RelaySettings) -> Result<AppSnapshot> {
         let mut settings = settings;
         settings.normalize_model_locations();
         let shortcut_warnings = normalize_shortcuts(&mut settings.shortcuts);
@@ -130,7 +145,7 @@ impl RelayApp {
             guard.snapshot.microphone.enabled = settings.microphone_enabled;
             guard.snapshot.system_audio.enabled = settings.system_audio_enabled;
             guard.snapshot.models = collect_models(&settings);
-            guard.pipeline.is_some()
+            guard.pipeline.is_some() || guard.snapshot.can_stop_listening()
         };
 
         self.persist_settings()?;
@@ -139,54 +154,94 @@ impl RelayApp {
         self.emit_snapshot()?;
 
         if should_restart {
+            let snapshot = self.snapshot_result()?;
+            if !snapshot.has_enabled_input() || !snapshot.stt_is_ready() {
+                self.push_diagnostic(
+                    "warning",
+                    "Settings changed. Listening stopped because the new input or transcription configuration is not ready.",
+                )?;
+                self.stop_listening()?;
+                return self.snapshot_result();
+            }
+
             self.restart_listening(
                 "Settings changed. Restarting audio pipeline with the new configuration.",
             )?;
         }
 
-        Ok(self.snapshot())
+        self.snapshot_result()
     }
 
-    pub fn start_listening(&self) -> Result<()> {
-        let settings = self.snapshot().settings;
-        if !settings.microphone_enabled && !settings.system_audio_enabled {
-            self.push_diagnostic(
-                "warning",
-                "Enable microphone or system audio before starting listening.",
-            )?;
-            return Ok(());
+    pub(crate) fn start_listening(&self) -> Result<()> {
+        enum StartBlocker {
+            NoInput,
+            SttUnavailable,
+            AlreadyActive,
         }
 
-        if !matches!(self.snapshot().stt_health, ServiceHealth::Ready) {
-            self.push_diagnostic(
-                "warning",
-                "Choose a valid Whisper model before starting listening.",
-            )?;
-            return Ok(());
-        }
-
-        {
+        let session_id = Uuid::new_v4();
+        let blocker = {
             let mut guard = self.lock_state()?;
-            if guard.pipeline.is_some() {
+            if !guard.snapshot.has_enabled_input() {
+                Some(StartBlocker::NoInput)
+            } else if !guard.snapshot.stt_is_ready() {
+                Some(StartBlocker::SttUnavailable)
+            } else if guard.pipeline.is_some()
+                || matches!(
+                    guard.snapshot.listening_state,
+                    ListeningState::Starting | ListeningState::Listening | ListeningState::Stopping
+                )
+            {
+                Some(StartBlocker::AlreadyActive)
+            } else {
+                guard.snapshot.listening_state = ListeningState::Starting;
+                guard.snapshot.active_session_id = Some(session_id);
+                guard.snapshot.session_started_at_ms = Some(now_ms());
+                guard.snapshot.session_segment_count = 0;
+                guard.snapshot.session_translation_count = 0;
+                guard.snapshot.session_translation_failure_count = 0;
+                guard.snapshot.microphone.capturing = false;
+                guard.snapshot.system_audio.capturing = false;
+                None
+            }
+        };
+
+        match blocker {
+            Some(StartBlocker::NoInput) => {
+                self.push_diagnostic(
+                    "warning",
+                    "Enable microphone or system audio before starting listening.",
+                )?;
                 return Ok(());
             }
-            guard.snapshot.listening_state = ListeningState::Starting;
-            guard.snapshot.session_started_at_ms = Some(now_ms());
-            guard.snapshot.session_segment_count = 0;
-            guard.snapshot.session_translation_count = 0;
-            guard.snapshot.session_translation_failure_count = 0;
-            guard.snapshot.microphone.capturing = false;
-            guard.snapshot.system_audio.capturing = false;
+            Some(StartBlocker::SttUnavailable) => {
+                self.push_diagnostic(
+                    "warning",
+                    "Choose a valid Whisper model before starting listening.",
+                )?;
+                return Ok(());
+            }
+            Some(StartBlocker::AlreadyActive) => return Ok(()),
+            None => {}
         }
-        self.emit_snapshot()?;
 
-        self.spawn_start_pipeline(Uuid::new_v4());
+        self.emit_snapshot()?;
+        self.spawn_start_pipeline(session_id);
         Ok(())
     }
 
-    pub fn stop_listening(&self) -> Result<()> {
+    pub(crate) fn stop_listening(&self) -> Result<()> {
         let pipeline = {
             let mut guard = self.lock_state()?;
+            let should_stop = guard.pipeline.is_some()
+                || matches!(
+                    guard.snapshot.listening_state,
+                    ListeningState::Starting | ListeningState::Listening
+                );
+            if !should_stop {
+                return Ok(());
+            }
+
             guard.snapshot.listening_state = ListeningState::Stopping;
             guard.snapshot.active_session_id = None;
             guard.snapshot.microphone.capturing = false;
@@ -207,15 +262,12 @@ impl RelayApp {
         Ok(())
     }
 
-    pub fn show_overlay(&self) -> Result<()> {
-        let always_on_top = self.snapshot().settings.overlay.always_on_top;
-        if let Some(window) = self.inner.app_handle.get_webview_window("overlay") {
+    pub(crate) fn show_overlay(&self) -> Result<()> {
+        let always_on_top = self.snapshot_result()?.settings.overlay.always_on_top;
+        if let Some(window) = self.overlay_window() {
             window.show()?;
             window.set_always_on_top(always_on_top)?;
-            #[cfg(target_os = "macos")]
-            {
-                let _ = window.set_visible_on_all_workspaces(true);
-            }
+            let _ = crate::platform::apply_overlay_platform_behavior(&window);
             window.set_focus()?;
         }
 
@@ -227,8 +279,8 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn hide_overlay(&self) -> Result<()> {
-        if let Some(window) = self.inner.app_handle.get_webview_window("overlay") {
+    pub(crate) fn hide_overlay(&self) -> Result<()> {
+        if let Some(window) = self.overlay_window() {
             window.set_always_on_top(false)?;
             window.hide()?;
         }
@@ -241,35 +293,29 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn show_controls(&self) -> Result<()> {
-        let Some(window) = self.inner.app_handle.get_webview_window("main") else {
-            return Err(anyhow!("main window is not available"));
-        };
+    pub(crate) fn show_controls(&self) -> Result<()> {
+        let window = self.window(crate::windowing::MAIN.label, "main")?;
         window.show()?;
         window.unminimize()?;
         window.set_focus()?;
         Ok(())
     }
 
-    pub fn show_settings(&self) -> Result<()> {
-        let Some(window) = self.inner.app_handle.get_webview_window("settings") else {
-            return Err(anyhow!("settings window is not available"));
-        };
+    pub(crate) fn show_settings(&self) -> Result<()> {
+        let window = self.window(crate::windowing::SETTINGS.label, "settings")?;
         window.show()?;
         window.unminimize()?;
         window.set_focus()?;
         Ok(())
     }
 
-    pub fn hide_settings(&self) -> Result<()> {
-        let Some(window) = self.inner.app_handle.get_webview_window("settings") else {
-            return Err(anyhow!("settings window is not available"));
-        };
+    pub(crate) fn hide_settings(&self) -> Result<()> {
+        let window = self.window(crate::windowing::SETTINGS.label, "settings")?;
         window.hide()?;
         Ok(())
     }
 
-    pub fn show_settings_section(&self, section: &str) -> Result<()> {
+    pub(crate) fn show_settings_section(&self, section: &str) -> Result<()> {
         self.show_settings()?;
         self.inner
             .app_handle
@@ -277,7 +323,7 @@ impl RelayApp {
         Ok(())
     }
 
-    pub fn clear_transcript_log(&self) -> Result<()> {
+    pub(crate) fn clear_transcript_log(&self) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
             guard.snapshot.transcript_cleared_at_ms = Some(now_ms());
@@ -285,7 +331,7 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn clear_translation_log(&self) -> Result<()> {
+    pub(crate) fn clear_translation_log(&self) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
             guard.snapshot.translation_cleared_at_ms = Some(now_ms());
@@ -293,7 +339,7 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn clear_diagnostics(&self) -> Result<()> {
+    pub(crate) fn clear_diagnostics(&self) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
             guard.snapshot.diagnostics.clear();
@@ -302,11 +348,13 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn config_preview(&self) -> Result<String> {
-        self.inner.settings.render(&self.snapshot().settings)
+    pub(crate) fn config_preview(&self) -> Result<String> {
+        self.inner
+            .settings
+            .render(&self.snapshot_result()?.settings)
     }
 
-    pub fn app_paths(&self) -> AppPaths {
+    pub(crate) fn app_paths(&self) -> AppPaths {
         AppPaths {
             config_file: self.inner.settings.path().to_string_lossy().to_string(),
             config_dir: self
@@ -325,7 +373,7 @@ impl RelayApp {
         }
     }
 
-    pub fn system_metrics(&self) -> Result<SystemMetrics> {
+    pub(crate) fn system_metrics(&self) -> Result<SystemMetrics> {
         let mut probe = self
             .inner
             .metrics
@@ -334,7 +382,7 @@ impl RelayApp {
         Ok(probe.sample())
     }
 
-    pub fn push_segment(&self, segment: SegmentRecord) -> Result<()> {
+    pub(crate) fn push_segment(&self, segment: SegmentRecord) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
             guard.snapshot.segments.insert(0, segment);
@@ -344,70 +392,70 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn update_segment_translation(
+    pub(crate) fn update_segment_translation(
         &self,
         segment_id: Uuid,
         result: Result<String>,
     ) -> Result<()> {
+        let mut diagnostic = None;
         {
             let mut guard = self.lock_state()?;
-            if let Some(segment) = guard
+            if let Some(index) = guard
                 .snapshot
                 .segments
-                .iter_mut()
-                .find(|segment| segment.id == segment_id)
+                .iter()
+                .position(|segment| segment.id == segment_id)
             {
                 match result {
                     Ok(translation) => {
-                        segment.translation = Some(translation);
-                        segment.status = SegmentStatus::Translated;
+                        {
+                            let segment = &mut guard.snapshot.segments[index];
+                            segment.translation = Some(translation);
+                            segment.status = SegmentStatus::Translated;
+                        }
                         guard.snapshot.translation_health = ServiceHealth::Ready;
                         guard.snapshot.session_translation_count += 1;
                     }
                     Err(error) => {
-                        segment.status = SegmentStatus::TranslationFailed;
-                        segment.translation = Some("Translation failed".to_string());
+                        let error = error.to_string();
+                        {
+                            let segment = &mut guard.snapshot.segments[index];
+                            segment.status = SegmentStatus::TranslationFailed;
+                            segment.translation = Some("Translation failed".to_string());
+                        }
                         guard.snapshot.translation_health = ServiceHealth::Degraded;
-                        guard.snapshot.translation_detail = Some(error.to_string());
+                        guard.snapshot.translation_detail = Some(error.clone());
                         guard.snapshot.session_translation_failure_count += 1;
-                        guard.snapshot.diagnostics.insert(
-                            0,
-                            DiagnosticsEntry {
-                                id: Uuid::new_v4(),
-                                timestamp_ms: now_ms(),
-                                level: "error".to_string(),
-                                message: format!("Translation failed: {error}"),
-                            },
-                        );
-                        guard.snapshot.diagnostics.truncate(MAX_DIAGNOSTICS);
+
+                        let entry =
+                            diagnostic_entry("error", format!("Translation failed: {error}"));
+                        add_diagnostic(&mut guard.snapshot, entry.clone());
+                        diagnostic = Some(entry);
                     }
                 }
             }
         }
+        if let Some(entry) = diagnostic {
+            self.append_diagnostic_to_file(&entry);
+        }
         self.emit_snapshot()
     }
 
-    pub fn push_diagnostic(
+    pub(crate) fn push_diagnostic(
         &self,
         level: impl Into<String>,
         message: impl Into<String>,
     ) -> Result<()> {
-        let entry = DiagnosticsEntry {
-            id: Uuid::new_v4(),
-            timestamp_ms: now_ms(),
-            level: level.into(),
-            message: message.into(),
-        };
+        let entry = diagnostic_entry(level, message);
         {
             let mut guard = self.lock_state()?;
-            guard.snapshot.diagnostics.insert(0, entry.clone());
-            guard.snapshot.diagnostics.truncate(MAX_DIAGNOSTICS);
+            add_diagnostic(&mut guard.snapshot, entry.clone());
         }
         self.append_diagnostic_to_file(&entry);
         self.emit_snapshot()
     }
 
-    pub fn update_stt_health(&self, health: ServiceHealth, detail: String) -> Result<()> {
+    pub(crate) fn update_stt_health(&self, health: ServiceHealth, detail: String) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
             guard.snapshot.stt_health = health;
@@ -416,7 +464,11 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn update_translation_health(&self, health: ServiceHealth, detail: String) -> Result<()> {
+    pub(crate) fn update_translation_health(
+        &self,
+        health: ServiceHealth,
+        detail: String,
+    ) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
             guard.snapshot.translation_health = health;
@@ -425,7 +477,7 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn set_listening_state(
+    pub(crate) fn set_listening_state(
         &self,
         state: ListeningState,
         session_id: Option<Uuid>,
@@ -445,7 +497,23 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn set_source_runtime(
+    pub(crate) fn activate_pipeline_session(&self, session_id: Uuid) -> Result<bool> {
+        let activated = {
+            let mut guard = self.lock_state()?;
+            if guard.snapshot.active_session_id != Some(session_id)
+                || !matches!(guard.snapshot.listening_state, ListeningState::Starting)
+            {
+                return Ok(false);
+            }
+
+            guard.snapshot.listening_state = ListeningState::Listening;
+            true
+        };
+        self.emit_snapshot()?;
+        Ok(activated)
+    }
+
+    pub(crate) fn set_source_runtime(
         &self,
         source: crate::domain::InputSource,
         capturing: bool,
@@ -475,7 +543,7 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub fn update_source_level(
+    pub(crate) fn update_source_level(
         &self,
         source: crate::domain::InputSource,
         input_level: f32,
@@ -519,7 +587,7 @@ impl RelayApp {
         Ok(())
     }
 
-    pub fn mark_source_error(
+    pub(crate) fn mark_source_error(
         &self,
         source: crate::domain::InputSource,
         detail: impl Into<String>,
@@ -544,10 +612,11 @@ impl RelayApp {
     }
 
     fn restart_listening(&self, reason: &str) -> Result<()> {
+        let session_id = Uuid::new_v4();
         let pipeline = {
             let mut guard = self.lock_state()?;
             guard.snapshot.listening_state = ListeningState::Starting;
-            guard.snapshot.active_session_id = None;
+            guard.snapshot.active_session_id = Some(session_id);
             guard.snapshot.microphone.capturing = false;
             guard.snapshot.system_audio.capturing = false;
             guard.pipeline.take()
@@ -559,7 +628,7 @@ impl RelayApp {
 
         self.push_diagnostic("info", reason)?;
         self.emit_snapshot()?;
-        self.spawn_start_pipeline(Uuid::new_v4());
+        self.spawn_start_pipeline(session_id);
         Ok(())
     }
 
@@ -569,26 +638,40 @@ impl RelayApp {
             match start_pipeline(Arc::new(this.clone()), session_id).await {
                 Ok(handle) => {
                     if let Ok(mut guard) = this.lock_state() {
-                        guard.pipeline = Some(handle);
+                        let session_is_current = guard.snapshot.active_session_id
+                            == Some(session_id)
+                            && !matches!(
+                                guard.snapshot.listening_state,
+                                ListeningState::Idle | ListeningState::Error
+                            );
+                        if session_is_current {
+                            guard.pipeline = Some(handle);
+                        } else {
+                            handle.stop();
+                        }
                     }
                     let _ = this.emit_snapshot();
                 }
                 Err(error) => {
-                    let _ = this
-                        .push_diagnostic("error", format!("Failed to start listening: {error:#}"));
-                    let _ = this.set_listening_state(ListeningState::Error, None);
+                    if this.is_session_current(session_id) {
+                        let _ = this.push_diagnostic(
+                            "error",
+                            format!("Failed to start listening: {error:#}"),
+                        );
+                        let _ = this.set_listening_state(ListeningState::Error, None);
+                    }
                 }
             }
         });
     }
 
     fn persist_settings(&self) -> Result<()> {
-        let snapshot = self.snapshot();
+        let snapshot = self.snapshot_result()?;
         self.inner.settings.save(&snapshot.settings)
     }
 
     fn refresh_runtime_healths(&self) -> Result<()> {
-        let snapshot = self.snapshot();
+        let snapshot = self.snapshot_result()?;
         let stt_detail = if let Err(detail) =
             validate_model_directory(&snapshot.settings.stt_model_path, "Whisper")
         {
@@ -629,22 +712,18 @@ impl RelayApp {
             return Ok(());
         }
 
-        let translation_provider = build_provider(&snapshot.settings.translation);
-        let report = tauri::async_runtime::block_on(translation_provider.check());
+        let report = build_provider(&snapshot.settings.translation).check_blocking();
         self.update_translation_health(report.health, report.detail)?;
         Ok(())
     }
 
     fn sync_overlay_window(&self) -> Result<()> {
-        let overlay = self.snapshot().settings.overlay;
-        if let Some(window) = self.inner.app_handle.get_webview_window("overlay") {
+        let overlay = self.snapshot_result()?.settings.overlay;
+        if let Some(window) = self.overlay_window() {
             window.set_always_on_top(overlay.always_on_top && overlay.visible)?;
             if overlay.visible {
                 window.show()?;
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = window.set_visible_on_all_workspaces(true);
-                }
+                let _ = crate::platform::apply_overlay_platform_behavior(&window);
             } else {
                 window.hide()?;
             }
@@ -712,171 +791,27 @@ impl RelayApp {
             .lock()
             .map_err(|_| anyhow!("relay state lock poisoned"))
     }
-}
 
-fn collect_models(settings: &RelaySettings) -> Vec<ModelRecord> {
-    let mut candidates = BTreeMap::<String, ModelRecord>::new();
-    collect_model_candidates(
-        &mut candidates,
-        ModelKind::Transcription,
-        &settings.stt_model_path,
-        &settings.stt_selected_model,
-        &["bin"],
-    );
-    collect_model_candidates(
-        &mut candidates,
-        ModelKind::Translation,
-        &settings.translation.model_path,
-        &settings.translation.selected_model,
-        &["gguf"],
-    );
-    candidates.into_values().collect()
-}
-
-fn collect_model_candidates(
-    out: &mut BTreeMap<String, ModelRecord>,
-    kind: ModelKind,
-    root_dir: &str,
-    selected_model: &str,
-    extensions: &[&str],
-) {
-    let root_dir = root_dir.trim();
-    if root_dir.is_empty() {
-        return;
+    fn window(&self, label: &str, name: &str) -> Result<WebviewWindow> {
+        self.inner
+            .app_handle
+            .get_webview_window(label)
+            .ok_or_else(|| anyhow!("{name} window is not available"))
     }
 
-    let root = Path::new(root_dir);
-    let Ok(metadata) = fs::metadata(root) else {
-        return;
-    };
-
-    if metadata.is_file() {
-        register_model(
-            out,
-            kind,
-            root.to_path_buf(),
-            root.parent().unwrap_or(root),
-            selected_model,
-        );
-        return;
+    fn overlay_window(&self) -> Option<WebviewWindow> {
+        self.inner
+            .app_handle
+            .get_webview_window(crate::windowing::OVERLAY.label)
     }
 
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
-        let Ok(entries) = fs::read_dir(&directory) else {
-            continue;
-        };
-
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
-                continue;
-            }
-
-            let extension = path
-                .extension()
-                .and_then(|value| value.to_str())
-                .unwrap_or_default();
-            if !extensions
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-            {
-                continue;
-            }
-
-            register_model(out, kind, path, root, selected_model);
-        }
+    pub(crate) fn is_session_current(&self, session_id: Uuid) -> bool {
+        self.inner
+            .state
+            .lock()
+            .map(|guard| guard.snapshot.active_session_id == Some(session_id))
+            .unwrap_or(false)
     }
-}
-
-fn register_model(
-    out: &mut BTreeMap<String, ModelRecord>,
-    kind: ModelKind,
-    path: PathBuf,
-    root: &Path,
-    selected_model: &str,
-) {
-    let path_string = path.to_string_lossy().to_string();
-    if path_string.is_empty() {
-        return;
-    }
-
-    let metadata = fs::metadata(&path).ok();
-    let exists = metadata.is_some();
-    let relative_path = path
-        .strip_prefix(root)
-        .ok()
-        .and_then(|value| value.to_str())
-        .unwrap_or_else(|| {
-            path.file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("Unknown model")
-        })
-        .to_string();
-    let active = !selected_model.trim().is_empty() && relative_path == selected_model.trim();
-    let state = if active {
-        if exists {
-            ModelState::Active
-        } else {
-            ModelState::Missing
-        }
-    } else if exists {
-        ModelState::Available
-    } else {
-        ModelState::Missing
-    };
-
-    let record = ModelRecord {
-        kind,
-        name: path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("Unknown model")
-            .to_string(),
-        relative_path,
-        path: path_string.clone(),
-        size_bytes: metadata.map(|value| value.len()),
-        state,
-    };
-
-    out.entry(path_string)
-        .and_modify(|current| {
-            if matches!(record.state, ModelState::Active | ModelState::Missing) {
-                *current = record.clone();
-            }
-        })
-        .or_insert(record);
-}
-
-fn validate_model_directory(path: &str, label: &str) -> Result<(), String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err(format!("{label} model directory is empty"));
-    }
-
-    let path = Path::new(trimmed);
-    if !path.exists() {
-        return Err(format!(
-            "{label} model directory is missing at {}",
-            path.display()
-        ));
-    }
-
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("{label} model directory is unavailable: {error}"))?;
-    if !metadata.is_dir() {
-        return Err(format!("{label} model directory must point to a folder"));
-    }
-
-    fs::read_dir(path).map_err(|error| {
-        format!(
-            "{label} model directory cannot be read at {}: {error}",
-            path.display()
-        )
-    })?;
-
-    Ok(())
 }
 
 impl SystemProbe {
@@ -931,6 +866,20 @@ impl SystemProbe {
                 .collect(),
         }
     }
+}
+
+fn diagnostic_entry(level: impl Into<String>, message: impl Into<String>) -> DiagnosticsEntry {
+    DiagnosticsEntry {
+        id: Uuid::new_v4(),
+        timestamp_ms: now_ms(),
+        level: level.into(),
+        message: message.into(),
+    }
+}
+
+fn add_diagnostic(snapshot: &mut AppSnapshot, entry: DiagnosticsEntry) {
+    snapshot.diagnostics.insert(0, entry);
+    snapshot.diagnostics.truncate(MAX_DIAGNOSTICS);
 }
 
 fn now_ms() -> u64 {

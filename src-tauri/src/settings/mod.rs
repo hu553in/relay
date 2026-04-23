@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -7,39 +8,56 @@ use serde::{Deserialize, Serialize};
 use crate::domain::{OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings};
 
 #[derive(Debug, Clone)]
-pub struct SettingsStore {
+pub(crate) struct SettingsStore {
     path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct LoadedSettings {
+    pub(crate) settings: RelaySettings,
+    pub(crate) warning: Option<String>,
+}
+
 impl SettingsStore {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let base = dirs::config_dir()
             .or_else(dirs::home_dir)
             .unwrap_or_else(|| PathBuf::from("."));
-        let path = base.join("Relay").join("settings.toml");
-        Self { path }
-    }
-
-    pub fn load(&self) -> RelaySettings {
-        match fs::read_to_string(&self.path) {
-            Ok(content) => match toml::from_str::<SettingsFile>(&content) {
-                Ok(file) => {
-                    let mut settings = file.into_settings();
-                    settings.normalize_model_locations();
-                    settings
-                }
-                Err(_) => {
-                    let mut settings =
-                        toml::from_str::<RelaySettings>(&content).unwrap_or_default();
-                    settings.normalize_model_locations();
-                    settings
-                }
-            },
-            Err(_) => RelaySettings::default(),
+        Self {
+            path: base.join("Relay").join("settings.toml"),
         }
     }
 
-    pub fn save(&self, settings: &RelaySettings) -> Result<()> {
+    pub(crate) fn load(&self) -> LoadedSettings {
+        match fs::read_to_string(&self.path) {
+            Ok(content) => match parse_settings(&content) {
+                Ok(settings) => LoadedSettings {
+                    settings,
+                    warning: None,
+                },
+                Err(error) => LoadedSettings {
+                    settings: RelaySettings::default(),
+                    warning: Some(format!(
+                        "Settings file {} could not be parsed. Defaults are active until settings are saved: {error}",
+                        self.path.display()
+                    )),
+                },
+            },
+            Err(error) if error.kind() == ErrorKind::NotFound => LoadedSettings {
+                settings: RelaySettings::default(),
+                warning: None,
+            },
+            Err(error) => LoadedSettings {
+                settings: RelaySettings::default(),
+                warning: Some(format!(
+                    "Settings file {} could not be read. Defaults are active until settings are saved: {error}",
+                    self.path.display()
+                )),
+            },
+        }
+    }
+
+    pub(crate) fn save(&self, settings: &RelaySettings) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)
                 .with_context(|| format!("create settings dir {}", parent.display()))?;
@@ -50,31 +68,32 @@ impl SettingsStore {
             .with_context(|| format!("write settings file {}", self.path.display()))
     }
 
-    pub fn render(&self, settings: &RelaySettings) -> Result<String> {
+    pub(crate) fn render(&self, settings: &RelaySettings) -> Result<String> {
         toml::to_string_pretty(&SettingsFile::from(settings)).map_err(Into::into)
     }
 
-    pub fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 
-    pub fn config_dir(&self) -> PathBuf {
+    pub(crate) fn config_dir(&self) -> PathBuf {
         self.path
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
-    pub fn logs_dir(&self) -> PathBuf {
+    pub(crate) fn logs_dir(&self) -> PathBuf {
         self.config_dir().join("logs")
     }
 
-    pub fn diagnostics_log_path(&self) -> PathBuf {
+    pub(crate) fn diagnostics_log_path(&self) -> PathBuf {
         self.logs_dir().join("diagnostics.log")
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct SettingsFile {
     #[serde(default)]
     inputs: InputsFile,
@@ -103,7 +122,6 @@ impl SettingsFile {
             },
             overlay: OverlaySettings {
                 visible: self.overlay.visible,
-                compact_mode: self.overlay.compact_mode,
                 always_on_top: self.overlay.always_on_top,
             },
             shortcuts: ShortcutSettings {
@@ -133,7 +151,6 @@ impl From<&RelaySettings> for SettingsFile {
             },
             overlay: OverlayFile {
                 visible: settings.overlay.visible,
-                compact_mode: settings.overlay.compact_mode,
                 always_on_top: settings.overlay.always_on_top,
             },
             shortcuts: ShortcutsFile {
@@ -145,6 +162,7 @@ impl From<&RelaySettings> for SettingsFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct InputsFile {
     #[serde(default = "default_true")]
     microphone: bool,
@@ -162,6 +180,7 @@ impl Default for InputsFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct TranscriptionFile {
     #[serde(default)]
     models_dir: String,
@@ -170,6 +189,7 @@ struct TranscriptionFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TranslationFile {
     #[serde(default)]
     models_dir: String,
@@ -193,11 +213,10 @@ impl Default for TranslationFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct OverlayFile {
     #[serde(default = "default_true")]
     visible: bool,
-    #[serde(default)]
-    compact_mode: bool,
     #[serde(default = "default_true")]
     always_on_top: bool,
 }
@@ -206,13 +225,13 @@ impl Default for OverlayFile {
     fn default() -> Self {
         Self {
             visible: true,
-            compact_mode: false,
             always_on_top: true,
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ShortcutsFile {
     #[serde(default = "default_toggle_listening")]
     toggle_listening: String,
@@ -247,4 +266,71 @@ fn default_toggle_listening() -> String {
 
 fn default_toggle_overlay() -> String {
     "CmdOrCtrl+Shift+O".to_string()
+}
+
+fn parse_settings(content: &str) -> Result<RelaySettings, toml::de::Error> {
+    let mut settings = toml::from_str::<SettingsFile>(content)?.into_settings();
+    settings.normalize_model_locations();
+    Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_settings;
+
+    #[test]
+    fn parses_sectioned_toml_settings() {
+        let settings = parse_settings(
+            r#"
+[inputs]
+microphone = false
+system_audio = true
+
+[transcription]
+models_dir = "/models/stt"
+model_file = "ggml-small.bin"
+
+[translation]
+models_dir = "/models/translation"
+model_file = "nested/qwen.gguf"
+target_language = "de"
+max_tokens = 64
+
+[overlay]
+visible = false
+always_on_top = false
+
+[shortcuts]
+toggle_listening = "CmdOrCtrl+Shift+T"
+toggle_overlay = "CmdOrCtrl+Shift+Y"
+"#,
+        )
+        .expect("sectioned TOML should parse");
+
+        assert!(!settings.microphone_enabled);
+        assert!(settings.system_audio_enabled);
+        assert_eq!(settings.stt_model_path, "/models/stt");
+        assert_eq!(settings.stt_selected_model, "ggml-small.bin");
+        assert_eq!(settings.translation.model_path, "/models/translation");
+        assert_eq!(settings.translation.selected_model, "nested/qwen.gguf");
+        assert_eq!(settings.translation.target_language, "de");
+        assert_eq!(settings.translation.max_tokens, 64);
+        assert!(!settings.overlay.visible);
+        assert!(!settings.overlay.always_on_top);
+        assert_eq!(settings.shortcuts.toggle_listening, "CmdOrCtrl+Shift+T");
+        assert_eq!(settings.shortcuts.toggle_overlay, "CmdOrCtrl+Shift+Y");
+    }
+
+    #[test]
+    fn rejects_removed_or_unknown_toml_fields() {
+        let error = parse_settings(
+            r#"
+[overlay]
+compact_mode = true
+"#,
+        )
+        .expect_err("unknown fields should be rejected");
+
+        assert!(error.to_string().contains("compact_mode"));
+    }
 }

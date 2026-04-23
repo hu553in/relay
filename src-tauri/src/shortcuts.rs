@@ -1,22 +1,30 @@
 use std::collections::HashSet;
 use std::str::FromStr;
 
+#[cfg(desktop)]
+use anyhow::Result;
+#[cfg(desktop)]
+use tauri::AppHandle;
 use tauri_plugin_global_shortcut::Shortcut;
+#[cfg(desktop)]
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
+#[cfg(desktop)]
+use crate::app::RelayApp;
 use crate::domain::ShortcutSettings;
 
 #[derive(Debug, Clone)]
-pub struct ResolvedShortcuts {
-    pub toggle_listening: Shortcut,
-    pub toggle_overlay: Shortcut,
-    pub warnings: Vec<String>,
+struct ResolvedShortcuts {
+    toggle_listening: Shortcut,
+    toggle_overlay: Shortcut,
+    warnings: Vec<String>,
 }
 
-pub fn normalize_shortcuts(settings: &mut ShortcutSettings) -> Vec<String> {
+pub(crate) fn normalize_shortcuts(settings: &mut ShortcutSettings) -> Vec<String> {
     resolve_shortcuts(settings).warnings
 }
 
-pub fn resolve_shortcuts(settings: &mut ShortcutSettings) -> ResolvedShortcuts {
+fn resolve_shortcuts(settings: &mut ShortcutSettings) -> ResolvedShortcuts {
     let defaults = ShortcutSettings::default();
     let mut warnings = Vec::new();
 
@@ -79,4 +87,52 @@ fn parse_or_default(
             Shortcut::from_str(default_value).expect("default shortcut must be valid")
         }
     }
+}
+
+#[cfg(desktop)]
+pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Result<()> {
+    let mut settings = relay.snapshot_result()?.settings.shortcuts;
+    let resolved = resolve_shortcuts(&mut settings);
+    let toggle_listening = resolved.toggle_listening;
+    let toggle_overlay = resolved.toggle_overlay;
+    for warning in resolved.warnings {
+        relay.push_diagnostic("warning", warning)?;
+    }
+
+    let relay_for_handler = relay.clone();
+    app.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(move |_app, shortcut, event| {
+                if event.state() != ShortcutState::Pressed {
+                    return;
+                }
+
+                let result = if shortcut == &toggle_listening {
+                    match relay_for_handler.snapshot().listening_state {
+                        crate::domain::ListeningState::Listening => {
+                            relay_for_handler.stop_listening()
+                        }
+                        _ => relay_for_handler.start_listening(),
+                    }
+                } else if shortcut == &toggle_overlay {
+                    if relay_for_handler.snapshot().settings.overlay.visible {
+                        relay_for_handler.hide_overlay()
+                    } else {
+                        relay_for_handler.show_overlay()
+                    }
+                } else {
+                    Ok(())
+                };
+
+                if let Err(error) = result {
+                    let _ = relay_for_handler
+                        .push_diagnostic("error", format!("Global shortcut failed: {error:#}"));
+                }
+            })
+            .build(),
+    )?;
+
+    app.global_shortcut().register(toggle_listening)?;
+    app.global_shortcut().register(toggle_overlay)?;
+    Ok(())
 }

@@ -29,7 +29,6 @@ pub enum ServiceHealth {
     Ready,
     Degraded,
     Unavailable,
-    Busy,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -52,7 +51,7 @@ pub struct SourceState {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelKind {
     Transcription,
@@ -129,7 +128,6 @@ impl Default for ShortcutSettings {
 #[serde(rename_all = "camelCase")]
 pub struct OverlaySettings {
     pub visible: bool,
-    pub compact_mode: bool,
     #[serde(default = "default_true")]
     pub always_on_top: bool,
 }
@@ -138,7 +136,6 @@ impl Default for OverlaySettings {
     fn default() -> Self {
         Self {
             visible: true,
-            compact_mode: false,
             always_on_top: true,
         }
     }
@@ -225,6 +222,31 @@ pub struct AppSnapshot {
     pub segments: Vec<SegmentRecord>,
     pub models: Vec<ModelRecord>,
     pub diagnostics: Vec<DiagnosticsEntry>,
+}
+
+impl AppSnapshot {
+    pub fn has_enabled_input(&self) -> bool {
+        self.settings.microphone_enabled || self.settings.system_audio_enabled
+    }
+
+    pub fn stt_is_ready(&self) -> bool {
+        matches!(self.stt_health, ServiceHealth::Ready)
+    }
+
+    pub fn can_start_listening(&self) -> bool {
+        matches!(
+            self.listening_state,
+            ListeningState::Idle | ListeningState::Error
+        ) && self.has_enabled_input()
+            && self.stt_is_ready()
+    }
+
+    pub fn can_stop_listening(&self) -> bool {
+        matches!(
+            self.listening_state,
+            ListeningState::Starting | ListeningState::Listening
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -326,14 +348,12 @@ fn normalize_model_location(directory: &mut String, selected_model: &mut String)
             .unwrap_or_default()
             .to_string();
         *directory = normalized_directory.to_string_lossy().to_string();
-        if selected_model.trim().is_empty() {
-            *selected_model = normalized_selected;
-        }
+        *selected_model = normalized_selected;
         return;
     }
 
     *directory = trimmed.to_string();
-    *selected_model = selected_model.trim().to_string();
+    *selected_model = normalize_model_reference(selected_model).unwrap_or_default();
 }
 
 fn resolve_selected_model_path(directory: &str, selected_model: &str) -> Option<PathBuf> {
@@ -343,9 +363,86 @@ fn resolve_selected_model_path(directory: &str, selected_model: &str) -> Option<
     }
 
     let root = Path::new(directory);
-    if selected_model.trim().is_empty() {
+    let selected_model = normalize_model_reference(selected_model)?;
+
+    Some(root.join(selected_model))
+}
+
+pub(crate) fn normalize_model_reference(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
         return None;
     }
 
-    Some(root.join(selected_model.trim()))
+    let value = value.replace('\\', "/");
+    if value.starts_with('/') {
+        return None;
+    }
+
+    let mut normalized = Vec::new();
+    for component in value.split('/') {
+        if component.is_empty() || component == "." || component == ".." || component.contains(':')
+        {
+            return None;
+        }
+        normalized.push(component);
+    }
+
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized.join("/"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{normalize_model_location, resolve_selected_model_path};
+
+    #[test]
+    fn selected_model_path_stays_under_models_directory() {
+        let resolved = resolve_selected_model_path("models", "nested/model.gguf");
+        assert_eq!(
+            resolved.unwrap(),
+            PathBuf::from("models").join("nested").join("model.gguf")
+        );
+    }
+
+    #[test]
+    fn selected_model_path_rejects_parent_traversal() {
+        assert!(resolve_selected_model_path("/models", "../outside.gguf").is_none());
+    }
+
+    #[test]
+    fn selected_model_path_rejects_absolute_paths() {
+        let absolute_model = std::env::current_dir().unwrap().join("model.gguf");
+        assert!(resolve_selected_model_path("models", &absolute_model.to_string_lossy()).is_none());
+    }
+
+    #[test]
+    fn selected_model_path_normalizes_backslashes() {
+        let resolved = resolve_selected_model_path("models", "nested\\model.gguf");
+        assert_eq!(
+            resolved.unwrap(),
+            PathBuf::from("models").join("nested").join("model.gguf")
+        );
+    }
+
+    #[test]
+    fn selected_model_path_rejects_windows_drive_paths() {
+        assert!(resolve_selected_model_path("models", "C:\\models\\model.gguf").is_none());
+    }
+
+    #[test]
+    fn normalize_model_location_clears_invalid_selected_model() {
+        let mut directory = "models".to_string();
+        let mut selected = "../outside.gguf".to_string();
+
+        normalize_model_location(&mut directory, &mut selected);
+
+        assert_eq!(directory, "models");
+        assert!(selected.is_empty());
+    }
 }

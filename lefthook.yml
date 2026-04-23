@@ -38,6 +38,10 @@ pre-commit:
         cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
         --all-targets --all-features -- -D warnings
 
+    - name: cargo-test
+      run: >-
+        cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features
+
 check:
   jobs:
     - name: eslint
@@ -63,6 +67,10 @@ check:
       run: >-
         cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
         --all-targets --all-features -- -D warnings
+
+    - name: cargo-test
+      run: >-
+        cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features
 
 check-fix:
   jobs:
@@ -92,3 +100,7 @@ check-fix:
       run: >-
         cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
         --all-targets --all-features -- -D warnings
+
+    - name: cargo-test
+      run: >-
+        cargo test --manifest-path src-tauri/Cargo.toml --workspace --all-features

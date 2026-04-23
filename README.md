@@ -136,7 +136,6 @@ max_tokens = 96
 
 [overlay]
 visible = true
-compact_mode = false
 always_on_top = true
 
 [shortcuts]

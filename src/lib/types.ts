@@ -1,6 +1,6 @@
 export type InputSource = 'microphone' | 'systemAudio';
 export type ListeningState = 'idle' | 'starting' | 'listening' | 'stopping' | 'error';
-export type ServiceHealth = 'unknown' | 'ready' | 'degraded' | 'unavailable' | 'busy';
+export type ServiceHealth = 'unknown' | 'ready' | 'degraded' | 'unavailable';
 export type SegmentStatus = 'transcribed' | 'translating' | 'translated' | 'translationFailed';
 export type ModelKind = 'transcription' | 'translation';
 export type ModelState = 'active' | 'available' | 'missing';
@@ -37,7 +37,6 @@ export interface ShortcutSettings {
 
 export interface OverlaySettings {
   visible: boolean;
-  compactMode: boolean;
   alwaysOnTop: boolean;
 }
 

@@ -11,21 +11,7 @@
   },
   "app": {
     "macOSPrivateApi": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "Relay Controls",
-        "width": 1080,
-        "height": 720,
-        "minWidth": 960,
-        "minHeight": 640,
-        "resizable": true,
-        "visible": false,
-        "center": true,
-        "hiddenTitle": true,
-        "titleBarStyle": "Overlay"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
