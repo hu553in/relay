@@ -330,7 +330,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const active = SECTION_BY_ID[activeSection];
 
   return (
-    <main className='relay-app-bg flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
+    <main className='bg-(--relay-app-bg) flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
       <WindowDragStrip />
       <div className='flex min-h-0 flex-1'>
         <aside className='flex h-full w-52 shrink-0 flex-col border-r border-white/6 bg-[rgba(15,15,14,0.82)] px-2.5 pb-3 pt-3'>
@@ -704,7 +704,7 @@ function SectionCard({
   children,
 }: PropsWithChildren<{ title: string; description?: string; action?: ReactNode }>) {
   return (
-    <section className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)]'>
+    <section className='rounded-xl border border-white/6 bg-(--relay-card-bg) p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)]'>
       <div className='mb-2.5 flex items-start justify-between gap-3'>
         <div>
           <h2 className='text-[13px] font-medium text-white'>{title}</h2>
@@ -822,7 +822,7 @@ function LanguageCombobox({
               className='group flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-[13px] text-stone-200 transition data-focus:bg-white/10 data-selected:text-stone-100'
             >
               <span className='flex items-center gap-2.5'>
-                <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-[0.08em] text-stone-400 group-data-selected:text-stone-300'>
+                <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-(--relay-tracking-wide) text-stone-400 group-data-selected:text-stone-300'>
                   {code.toUpperCase()}
                 </span>
                 <span>{LANGUAGE_NAMES[code] ?? code}</span>
@@ -838,7 +838,7 @@ function LanguageCombobox({
               value={needle}
               className='group mt-1 flex cursor-pointer items-center gap-2.5 rounded-lg border border-dashed border-white/10 px-2.5 py-2 text-[13px] text-stone-300 transition data-focus:border-stone-300/40 data-focus:bg-white/9'
             >
-              <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-[0.08em] text-stone-300'>
+              <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-(--relay-tracking-wide) text-stone-300'>
                 {needle.toUpperCase()}
               </span>
               <span>

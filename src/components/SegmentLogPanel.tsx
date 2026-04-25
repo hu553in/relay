@@ -65,12 +65,15 @@ export function SegmentLogPanel({
             <div className='flex items-center gap-2'>
               <h3 className='text-[14.5px] font-medium text-white'>{title}</h3>
               {language ? (
-                <Badge className='text-[10px] font-semibold tracking-[0.08em]'>
+                <Badge className='text-[10px] font-semibold tracking-(--relay-tracking-wide)'>
                   {language.toUpperCase()}
                 </Badge>
               ) : null}
               {live ? (
-                <Badge tone='success' className='text-[10px] font-semibold tracking-[0.08em]'>
+                <Badge
+                  tone='success'
+                  className='text-[10px] font-semibold tracking-(--relay-tracking-wide)'
+                >
                   Live
                 </Badge>
               ) : null}
@@ -109,7 +112,7 @@ export function SegmentLogPanel({
           <button
             type='button'
             onClick={jumpToLatest}
-            className='absolute bottom-4 right-4 rounded-lg border border-white/12 bg-[rgba(34,34,32,0.94)] px-3 py-1.5 text-[11px] font-medium text-stone-200 shadow-[0_10px_24px_rgba(0,0,0,0.28)] transition hover:border-white/16 hover:bg-[rgba(50,50,47,0.96)] hover:text-white'
+            className='absolute bottom-4 right-4 rounded-lg border border-white/12 bg-[rgba(34,34,32,0.94)] px-3 py-1.5 text-[11px] font-medium text-stone-200 shadow-[0_10px_24px_var(--relay-shadow-soft)] transition hover:border-white/16 hover:bg-[rgba(50,50,47,0.96)] hover:text-white'
           >
             Jump to latest
           </button>

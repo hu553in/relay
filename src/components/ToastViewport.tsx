@@ -20,7 +20,7 @@ export function ToastViewport({
       {toasts.map(toast => (
         <article
           key={toast.id}
-          className={`relay-toast pointer-events-auto rounded-xl border px-4 py-3 shadow-[0_12px_36px_rgba(0,0,0,0.28)] ${toneClass(
+          className={`relay-toast pointer-events-auto rounded-xl border px-4 py-3 shadow-[0_12px_36px_var(--relay-shadow-soft)] ${toneClass(
             toast.tone
           )}`}
         >

@@ -24,9 +24,9 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
   });
 
   useEffect(() => {
-    document.body.classList.add('relay-transparent');
+    document.body.classList.add('bg-transparent');
     return () => {
-      document.body.classList.remove('relay-transparent');
+      document.body.classList.remove('bg-transparent');
     };
   }, []);
 

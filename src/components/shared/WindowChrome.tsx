@@ -4,7 +4,7 @@ export function WindowDragStrip() {
 
 export function WindowShell({ message }: { message: string }) {
   return (
-    <main className='relay-app-bg grid h-screen place-items-center text-stone-100'>
+    <main className='bg-(--relay-app-bg) grid h-screen place-items-center text-stone-100'>
       <div className='rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm text-stone-300 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl'>
         {message}
       </div>

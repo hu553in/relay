@@ -5,46 +5,17 @@
   font-family: 'SF Pro Display', 'SF Pro Text', Inter, 'Helvetica Neue', sans-serif;
 
   --relay-bg: #1c1c1a;
+  --relay-app-bg: #1f1f1d;
   --relay-panel: rgb(38 38 36 / 86%);
+  --relay-card-bg: rgb(18 18 17 / 72%);
+  --relay-shadow-soft: rgb(0 0 0 / 28%);
+  --relay-tracking-wide: 0.08em;
   --relay-border: rgb(255 255 255 / 8%);
   --relay-border-strong: rgb(255 255 255 / 14%);
   --relay-text: #f2f0ea;
   --relay-muted: #9b9790;
   --relay-accent: #d6d3cc;
   --relay-accent-strong: #f97316;
-}
-
-html,
-body,
-#root {
-  min-height: 100vh;
-  height: 100%;
-}
-
-body {
-  margin: 0;
-  color: var(--relay-text);
-  background: var(--relay-bg);
-  overflow: hidden;
-}
-
-body.relay-transparent {
-  background: transparent;
-}
-
-.relay-app-bg {
-  background: #1f1f1d;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
 }
 
 button,

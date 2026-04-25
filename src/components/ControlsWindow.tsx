@@ -116,7 +116,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
   }
 
   return (
-    <main className='relay-app-bg flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
+    <main className='bg-(--relay-app-bg) flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
       <WindowDragStrip />
       <section className='min-h-0 flex-1 overflow-hidden'>
         <div className='mx-auto flex h-full max-w-350 min-h-0 flex-col gap-4 px-6 pb-5 pt-2'>
@@ -185,7 +185,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
           ) : null}
 
           {showStats ? (
-            <div className='relay-scroll grid min-h-0 flex-1 content-start gap-3 overflow-y-auto rounded-2xl border border-white/8 bg-[rgba(18,18,17,0.72)] p-3'>
+            <div className='relay-scroll grid min-h-0 flex-1 content-start gap-3 overflow-y-auto rounded-2xl border border-white/8 bg-(--relay-card-bg) p-3'>
               <div className='grid gap-3 md:grid-cols-2'>
                 <ModelCard
                   title='Transcription'
@@ -329,7 +329,7 @@ function ModelCard({
   health: ServiceHealth;
 }) {
   return (
-    <article className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3'>
+    <article className='rounded-xl border border-white/6 bg-(--relay-card-bg) px-4 py-3'>
       <div className='flex items-center justify-between gap-3'>
         <div className='min-w-0'>
           <p className='text-[11px] font-medium text-stone-500'>{title}</p>
@@ -359,7 +359,7 @@ function StatPill({
 }) {
   const valueClass = warn ? 'text-rose-200' : accent ? 'text-stone-100' : 'text-white';
   return (
-    <div className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3'>
+    <div className='rounded-xl border border-white/6 bg-(--relay-card-bg) px-4 py-3'>
       <p className='text-[11px] font-medium text-stone-500'>{label}</p>
       <p className={`mt-1 text-lg font-medium tabular-nums ${valueClass}`}>{value}</p>
     </div>
@@ -368,7 +368,7 @@ function StatPill({
 
 function MetricPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3'>
+    <div className='rounded-xl border border-white/6 bg-(--relay-card-bg) px-4 py-3'>
       <p className='text-[11px] font-medium text-stone-500'>{label}</p>
       <p className='mt-1 text-[13px] text-white tabular-nums' title={value}>
         {value}
@@ -381,7 +381,7 @@ function TemperatureChipsCard({ metrics }: { metrics: SystemMetrics | null }) {
   const readings = hotTemperatureReadings(metrics);
 
   return (
-    <div className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3 sm:col-span-2 xl:col-span-4'>
+    <div className='rounded-xl border border-white/6 bg-(--relay-card-bg) px-4 py-3 sm:col-span-2 xl:col-span-4'>
       <p className='text-[11px] font-medium text-stone-500'>Temperature sensors</p>
       {readings.length > 0 ? (
         <div className='mt-2 flex flex-wrap gap-2'>
