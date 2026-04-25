@@ -12,6 +12,7 @@ import { type PropsWithChildren, useEffect, useState } from 'react';
 
 import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { SegmentLogPanel } from '@/components/SegmentLogPanel';
+import { Badge } from '@/components/shared/Badge';
 import { HealthBadge } from '@/components/shared/HealthBadge';
 import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
 import { LogoMark, WindowDragStrip, WindowShell } from '@/components/shared/WindowChrome';
@@ -115,17 +116,17 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
   }
 
   return (
-    <main className='relay-app-bg flex h-screen w-screen flex-col overflow-hidden text-slate-100'>
+    <main className='relay-app-bg flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
       <WindowDragStrip />
       <section className='min-h-0 flex-1 overflow-hidden'>
-        <div className='mx-auto flex h-full max-w-350 min-h-0 flex-col gap-5 px-8 pb-6 pt-2'>
-          <header className='rounded-[28px] border border-white/8 bg-[rgba(10,15,26,0.72)] px-6 py-5 shadow-[0_24px_80px_rgba(0,0,0,0.24)] backdrop-blur-2xl'>
+        <div className='mx-auto flex h-full max-w-350 min-h-0 flex-col gap-4 px-6 pb-5 pt-2'>
+          <header className='rounded-2xl border border-white/8 bg-[rgba(31,31,29,0.92)] px-5 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.12)]'>
             <div className='flex flex-wrap items-center justify-between gap-4'>
               <div className='flex min-w-0 items-center gap-3'>
                 <LogoMark listening={isListening} />
                 <div className='min-w-0'>
                   <div className='flex items-center gap-3'>
-                    <h1 className='text-[28px] font-semibold tracking-tight text-white'>Relay</h1>
+                    <h1 className='text-[22px] font-semibold text-white'>Relay</h1>
                     <LiveBadge state={state} />
                   </div>
                 </div>
@@ -184,7 +185,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
           ) : null}
 
           {showStats ? (
-            <div className='relay-scroll grid min-h-0 flex-1 content-start gap-3 overflow-y-auto rounded-3xl border border-white/8 bg-[rgba(10,15,26,0.58)] p-3'>
+            <div className='relay-scroll grid min-h-0 flex-1 content-start gap-3 overflow-y-auto rounded-2xl border border-white/8 bg-[rgba(18,18,17,0.72)] p-3'>
               <div className='grid gap-3 md:grid-cols-2'>
                 <ModelCard
                   title='Transcription'
@@ -260,7 +261,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                 />
               </div>
 
-              <section className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 overflow-hidden'>
+              <section className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden'>
                 <SegmentLogPanel
                   title='Original'
                   language='EN'
@@ -328,17 +329,17 @@ function ModelCard({
   health: ServiceHealth;
 }) {
   return (
-    <article className='rounded-2xl border border-white/8 bg-black/20 px-4 py-3'>
+    <article className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3'>
       <div className='flex items-center justify-between gap-3'>
         <div className='min-w-0'>
-          <p className='text-[11px] font-medium text-slate-500'>{title}</p>
-          <p className='mt-1 truncate text-sm text-cyan-200'>
+          <p className='text-[11px] font-medium text-stone-500'>{title}</p>
+          <p className='mt-1 truncate text-[13px] text-stone-200'>
             {model?.relativePath ?? model?.name ?? 'No model selected'}
           </p>
         </div>
         <HealthBadge health={health} />
       </div>
-      <p className='mt-2 min-w-0 truncate text-[12px] text-slate-400'>
+      <p className='mt-2 min-w-0 truncate text-[12px] text-stone-400'>
         {model?.path ?? model?.relativePath ?? 'Not selected'}
       </p>
     </article>
@@ -356,20 +357,20 @@ function StatPill({
   accent?: boolean;
   warn?: boolean;
 }) {
-  const valueClass = warn ? 'text-rose-200' : accent ? 'text-cyan-200' : 'text-white';
+  const valueClass = warn ? 'text-rose-200' : accent ? 'text-stone-100' : 'text-white';
   return (
-    <div className='rounded-2xl border border-white/8 bg-black/20 px-4 py-3'>
-      <p className='text-[11px] font-medium text-slate-500'>{label}</p>
-      <p className={`mt-1 text-xl font-medium tabular-nums ${valueClass}`}>{value}</p>
+    <div className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3'>
+      <p className='text-[11px] font-medium text-stone-500'>{label}</p>
+      <p className={`mt-1 text-lg font-medium tabular-nums ${valueClass}`}>{value}</p>
     </div>
   );
 }
 
 function MetricPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rounded-2xl border border-white/8 bg-black/20 px-4 py-3'>
-      <p className='text-[11px] font-medium text-slate-500'>{label}</p>
-      <p className='mt-1 text-sm text-white tabular-nums' title={value}>
+    <div className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3'>
+      <p className='text-[11px] font-medium text-stone-500'>{label}</p>
+      <p className='mt-1 text-[13px] text-white tabular-nums' title={value}>
         {value}
       </p>
     </div>
@@ -380,14 +381,14 @@ function TemperatureChipsCard({ metrics }: { metrics: SystemMetrics | null }) {
   const readings = hotTemperatureReadings(metrics);
 
   return (
-    <div className='rounded-2xl border border-white/8 bg-black/20 px-4 py-3 sm:col-span-2'>
-      <p className='text-[11px] font-medium text-slate-500'>Temperature sensors</p>
+    <div className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] px-4 py-3 sm:col-span-2 xl:col-span-4'>
+      <p className='text-[11px] font-medium text-stone-500'>Temperature sensors</p>
       {readings.length > 0 ? (
         <div className='mt-2 flex flex-wrap gap-2'>
           {readings.map(reading => (
             <span
               key={`${reading.label}-${String(reading.temperatureC)}`}
-              className='inline-flex items-center gap-2 rounded-full border border-white/8 bg-white/4 px-2.5 py-1 text-[12px] text-slate-300'
+              className='inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/2.5 px-2.5 py-1 text-[11.5px] text-stone-300 transition hover:border-white/14 hover:bg-white/6 hover:text-stone-100'
               title={reading.label}
             >
               <span className='max-w-40 truncate'>{reading.label}</span>
@@ -398,7 +399,7 @@ function TemperatureChipsCard({ metrics }: { metrics: SystemMetrics | null }) {
           ))}
         </div>
       ) : (
-        <p className='mt-1 text-sm text-slate-400'>Unavailable</p>
+        <p className='mt-1 text-[13px] text-stone-400'>Unavailable</p>
       )}
     </div>
   );
@@ -416,16 +417,16 @@ function PrimaryButton({
 }>) {
   const className =
     tone === 'primary'
-      ? 'bg-gradient-to-br from-cyan-300 to-sky-400 text-slate-950 shadow-[0_8px_24px_rgba(56,182,255,0.35)] hover:brightness-110'
+      ? 'bg-stone-100 text-neutral-950 hover:bg-stone-300'
       : tone === 'danger'
-        ? 'bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-[0_8px_24px_rgba(244,63,94,0.28)] hover:brightness-110'
-        : 'border border-white/10 bg-white/[0.05] text-white hover:bg-white/[0.1]';
+        ? 'bg-rose-500/85 text-white hover:bg-rose-500'
+        : 'border border-white/10 bg-white/[0.05] text-white hover:border-white/14 hover:bg-white/[0.11]';
   return (
     <button
       type='button'
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
+      className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-[13px] font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
     >
       {children}
     </button>
@@ -435,24 +436,23 @@ function PrimaryButton({
 function LiveBadge({ state }: { state: ListeningState }) {
   if (state === 'listening') {
     return (
-      <span className='inline-flex items-center gap-1.5 rounded-full bg-emerald-400/12 px-2.5 py-1 text-[11px] font-semibold tracking-[0.04em] text-emerald-200'>
+      <Badge tone='success' size='md'>
         <span className='relay-dot-live block h-1.5 w-1.5 rounded-full bg-emerald-300' />
         Live
-      </span>
+      </Badge>
     );
   }
   const tone =
     state === 'error'
-      ? 'bg-rose-500/15 text-rose-200'
+      ? 'danger'
       : state === 'starting' || state === 'stopping'
-        ? 'bg-amber-300/15 text-amber-200'
-        : 'bg-white/8 text-slate-300';
+        ? 'warning'
+        : 'neutral';
+
   return (
-    <span
-      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-[0.04em] ${tone}`}
-    >
+    <Badge tone={tone} size='md'>
       {listeningStateLabel(state)}
-    </span>
+    </Badge>
   );
 }
 

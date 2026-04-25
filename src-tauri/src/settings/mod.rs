@@ -322,15 +322,15 @@ toggle_overlay = "CmdOrCtrl+Shift+Y"
     }
 
     #[test]
-    fn rejects_removed_or_unknown_toml_fields() {
+    fn rejects_unknown_toml_fields() {
         let error = parse_settings(
             r#"
 [overlay]
-compact_mode = true
+unknown_setting = true
 "#,
         )
         .expect_err("unknown fields should be rejected");
 
-        assert!(error.to_string().contains("compact_mode"));
+        assert!(error.to_string().contains("unknown_setting"));
     }
 }

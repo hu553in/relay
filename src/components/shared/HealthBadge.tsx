@@ -1,3 +1,4 @@
+import { Badge, type BadgeTone } from '@/components/shared/Badge';
 import type { ServiceHealth } from '@/lib/types';
 
 const HEALTH_LABELS: Record<ServiceHealth, string> = {
@@ -7,18 +8,16 @@ const HEALTH_LABELS: Record<ServiceHealth, string> = {
   unknown: 'Unknown',
 };
 
+function healthTone(health: ServiceHealth): BadgeTone {
+  if (health === 'ready') {
+    return 'success';
+  }
+  if (health === 'degraded' || health === 'unavailable') {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
 export function HealthBadge({ health }: { health: ServiceHealth }) {
-  const tone =
-    health === 'ready'
-      ? 'bg-emerald-400/15 text-emerald-200'
-      : health === 'degraded' || health === 'unavailable'
-        ? 'bg-rose-500/15 text-rose-200'
-        : 'bg-white/8 text-slate-300';
-  return (
-    <span
-      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-[0.04em] ${tone}`}
-    >
-      {HEALTH_LABELS[health]}
-    </span>
-  );
+  return <Badge tone={healthTone(health)}>{HEALTH_LABELS[health]}</Badge>;
 }

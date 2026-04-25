@@ -15,10 +15,10 @@ export function Switch({
       aria-checked={checked}
       disabled={disabled}
       onClick={() => {
-        onChange(!checked);
+        if (!disabled) onChange(!checked);
       }}
       className={`relative inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition ${
-        checked ? 'border-cyan-300/40 bg-cyan-300/80' : 'border-white/10 bg-white/5'
+        checked ? 'border-cyan-300/18 bg-cyan-500/35' : 'border-white/10 bg-white/5'
       } ${cursorClass}`}
     >
       <span

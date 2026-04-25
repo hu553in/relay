@@ -16,7 +16,7 @@ export function IconButton({
       onClick={onClick}
       aria-label={label}
       title={label}
-      className='inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/4 text-slate-100 transition hover:bg-white/8'
+      className='inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent bg-transparent text-stone-300 transition hover:bg-white/10 hover:text-white'
     >
       {icon}
     </button>

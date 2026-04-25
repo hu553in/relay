@@ -4,14 +4,14 @@
   color-scheme: dark;
   font-family: 'SF Pro Display', 'SF Pro Text', Inter, 'Helvetica Neue', sans-serif;
 
-  --relay-bg: #070b14;
-  --relay-panel: rgb(12 18 30 / 86%);
+  --relay-bg: #1c1c1a;
+  --relay-panel: rgb(38 38 36 / 86%);
   --relay-border: rgb(255 255 255 / 8%);
   --relay-border-strong: rgb(255 255 255 / 14%);
-  --relay-text: #e8eefb;
-  --relay-muted: #93a2bd;
-  --relay-accent: #7cd3ff;
-  --relay-accent-strong: #38b6ff;
+  --relay-text: #f2f0ea;
+  --relay-muted: #9b9790;
+  --relay-accent: #d6d3cc;
+  --relay-accent-strong: #f97316;
 }
 
 html,
@@ -33,11 +33,7 @@ body.relay-transparent {
 }
 
 .relay-app-bg {
-  background:
-    radial-gradient(1200px 700px at 8% -10%, rgb(92 180 255 / 18%), transparent 60%),
-    radial-gradient(900px 600px at 110% 5%, rgb(126 107 255 / 14%), transparent 55%),
-    radial-gradient(700px 400px at 50% 110%, rgb(44 94 170 / 18%), transparent 60%),
-    linear-gradient(180deg, #060a12 0%, #080d18 60%, #070b14 100%);
+  background: #1f1f1d;
 }
 
 * {
@@ -66,7 +62,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 button:focus-visible {
-  outline: 2px solid rgb(124 211 255 / 55%);
+  outline: 2px solid rgb(214 211 204 / 42%);
   outline-offset: 2px;
 }
 
@@ -103,18 +99,18 @@ button:focus-visible {
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: padding-box;
-  background-color: rgb(148 163 184 / 22%);
+  background-color: rgb(168 162 158 / 20%);
   transition: background-color 150ms ease;
 }
 
 .relay-scroll::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(148 163 184 / 36%);
+  background-color: rgb(168 162 158 / 34%);
 }
 
 @keyframes relay-pulse {
   0%,
   100% {
-    transform: scaleY(0.3);
+    transform: scaleY(0.55);
     opacity: 0.5;
   }
 

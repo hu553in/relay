@@ -31,6 +31,7 @@ import { type PropsWithChildren, type ReactNode, useEffect, useId, useMemo, useS
 
 import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { type LogEntry, SegmentLogPanel } from '@/components/SegmentLogPanel';
+import { Badge } from '@/components/shared/Badge';
 import { HealthBadge } from '@/components/shared/HealthBadge';
 import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
 import { Switch } from '@/components/shared/Switch';
@@ -329,16 +330,16 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const active = SECTION_BY_ID[activeSection];
 
   return (
-    <main className='relay-app-bg flex h-screen w-screen flex-col overflow-hidden text-slate-100'>
+    <main className='relay-app-bg flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
       <WindowDragStrip />
       <div className='flex min-h-0 flex-1'>
-        <aside className='flex h-full w-65 shrink-0 flex-col border-r border-white/6 bg-[rgba(8,13,22,0.72)] px-3 pb-3 pt-10 backdrop-blur-2xl'>
-          <div className='rounded-2xl border border-white/8 bg-white/3 px-3.5 py-3'>
-            <p className='text-sm font-semibold tracking-tight text-white'>Settings</p>
-            <p className='mt-1 text-[11px] text-slate-500'>Relay v{version}</p>
+        <aside className='flex h-full w-52 shrink-0 flex-col border-r border-white/6 bg-[rgba(15,15,14,0.82)] px-2.5 pb-3 pt-3'>
+          <div className='rounded-xl border border-white/8 bg-white/[0.035] px-3 py-2.5'>
+            <p className='text-[12.5px] font-semibold text-white'>Settings</p>
+            <p className='mt-0.5 text-[10.5px] text-stone-500'>Relay v{version}</p>
           </div>
 
-          <nav className='relay-scroll mt-3 grid gap-0.5 overflow-y-auto pr-1'>
+          <nav className='relay-scroll mt-2.5 grid gap-0.5 overflow-y-auto pr-1'>
             {SECTION_ITEMS.map(item => (
               <NavButton
                 key={item.id}
@@ -354,25 +355,19 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
         </aside>
 
         <section className='relay-scroll flex-1 overflow-y-auto'>
-          <div className='sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-white/6 bg-[rgba(7,11,20,0.72)] px-8 py-5 backdrop-blur-xl'>
+          <div className='sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-white/6 bg-[rgba(31,31,29,0.96)] px-5 py-3'>
             <div>
-              <h1 className='text-[22px] font-semibold tracking-tight text-white'>
-                {active.label}
-              </h1>
-              <p className='mt-0.5 text-[13px] text-slate-400'>{active.description}</p>
+              <h1 className='text-[17px] font-semibold text-white'>{active.label}</h1>
+              <p className='mt-0.5 text-[11.5px] text-stone-400'>{active.description}</p>
             </div>
 
             <div className='flex items-center gap-2'>
-              {isDirty ? (
-                <span className='rounded-full bg-amber-300/15 px-2.5 py-1 text-[11px] tracking-[0.16em] text-amber-200'>
-                  Unsaved
-                </span>
-              ) : null}
+              {isDirty ? <Badge tone='warning'>Unsaved</Badge> : null}
               <button
                 type='button'
                 onClick={() => void saveSettings()}
                 disabled={isSaving || !isDirty}
-                className='inline-flex items-center gap-2 rounded-xl bg-linear-to-br from-cyan-300 to-sky-400 px-4 py-2 text-sm font-medium text-slate-950 shadow-[0_8px_24px_rgba(56,182,255,0.3)] transition hover:brightness-110 disabled:opacity-40 disabled:shadow-none'
+                className='inline-flex items-center gap-2 rounded-lg bg-stone-100 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-stone-300 disabled:cursor-not-allowed disabled:bg-white/6 disabled:text-stone-500 disabled:opacity-100'
               >
                 <Save size={14} />
                 {isSaving ? 'Saving...' : 'Save settings'}
@@ -380,7 +375,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             </div>
           </div>
 
-          <div className='mx-auto w-full max-w-260 px-8 py-6'>
+          <div className='mx-auto w-full max-w-230 px-5 py-4'>
             {activeSection === 'inputs' ? (
               <SectionGrid cols={2}>
                 <InputSourceStatusCard
@@ -430,12 +425,12 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <InlineNote>
-                    ⚠️ Whisper GGML *.bin models are supported here. Multilingual models cover many
+                    Whisper GGML *.bin models are supported here. Multilingual models cover many
                     languages. English-only variants (with &quot;en&quot; in name) are faster, but
                     they will not handle mixed or non-English speech.
                   </InlineNote>
                   <ActionRow
-                    label='Browse Whisper transcription models on Hugging Face 🤗'
+                    label='Browse Whisper transcription models on Hugging Face'
                     onClick={() => {
                       void openUrl('https://huggingface.co/ggerganov/whisper.cpp/tree/main');
                     }}
@@ -508,12 +503,12 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <InlineNote>
-                    ⚠️ Use llama.cpp-compatible instruct or chat GGUF models. The Hugging Face
-                    filter below is a good starting point, but every result still needs a chat
-                    template and practical translation quality.
+                    Use llama.cpp-compatible instruct or chat GGUF models. The Hugging Face filter
+                    below is a good starting point, but every result still needs a chat template and
+                    practical translation quality.
                   </InlineNote>
                   <ActionRow
-                    label='Browse translation model candidates on Hugging Face 🤗'
+                    label='Browse translation model candidates on Hugging Face'
                     onClick={() => {
                       void openUrl(
                         'https://huggingface.co/models?pipeline_tag=translation&library=gguf&apps=llama.cpp'
@@ -682,13 +677,13 @@ function NavButton({
     <button
       type='button'
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] transition ${
-        active ? 'bg-white/8 text-white' : 'text-slate-300 hover:bg-white/4 hover:text-white'
+      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[11px] transition ${
+        active ? 'bg-white/6 text-white' : 'text-stone-300 hover:bg-white/7 hover:text-white'
       }`}
     >
       <span
-        className={`grid h-6 w-6 place-items-center rounded-md text-[13px] ${
-          active ? 'bg-cyan-300/15 text-cyan-200' : 'bg-white/4 text-slate-400'
+        className={`grid h-4.5 w-4.5 place-items-center text-[11.5px] ${
+          active ? 'text-stone-100' : 'text-stone-400'
         }`}
       >
         {icon}
@@ -699,7 +694,7 @@ function NavButton({
 }
 
 function SectionGrid({ cols = 1, children }: PropsWithChildren<{ cols?: 1 | 2 }>) {
-  return <div className={`grid gap-4 ${cols === 2 ? 'lg:grid-cols-2' : ''}`}>{children}</div>;
+  return <div className={`grid gap-2.5 ${cols === 2 ? 'lg:grid-cols-2' : ''}`}>{children}</div>;
 }
 
 function SectionCard({
@@ -709,17 +704,17 @@ function SectionCard({
   children,
 }: PropsWithChildren<{ title: string; description?: string; action?: ReactNode }>) {
   return (
-    <section className='rounded-2xl border border-white/8 bg-[rgba(10,15,26,0.6)] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.18)]'>
-      <div className='mb-3 flex items-start justify-between gap-3'>
+    <section className='rounded-xl border border-white/6 bg-[rgba(18,18,17,0.72)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)]'>
+      <div className='mb-2.5 flex items-start justify-between gap-3'>
         <div>
-          <h2 className='text-[15px] font-medium tracking-tight text-white'>{title}</h2>
+          <h2 className='text-[13px] font-medium text-white'>{title}</h2>
           {description ? (
-            <p className='mt-0.5 text-[12.5px] leading-5 text-slate-400'>{description}</p>
+            <p className='mt-0.5 text-[11.5px] leading-5 text-stone-400'>{description}</p>
           ) : null}
         </div>
         {action}
       </div>
-      <div className='grid gap-3'>{children}</div>
+      <div className='grid gap-2.5'>{children}</div>
     </section>
   );
 }
@@ -727,12 +722,14 @@ function SectionCard({
 function Field({ label, hint, children }: PropsWithChildren<{ label: string; hint?: string }>) {
   const labelId = useId();
   return (
-    <div role='group' aria-labelledby={labelId} className='grid gap-2 text-sm text-slate-300'>
-      <div className='flex items-center justify-between gap-3'>
-        <span id={labelId} className='text-[13px] font-medium text-slate-200'>
+    <div role='group' aria-labelledby={labelId} className='grid gap-1.5 text-[12px] text-stone-300'>
+      <div className='flex flex-wrap items-center justify-between gap-x-3 gap-y-1'>
+        <span id={labelId} className='text-[12px] font-medium text-stone-200'>
           {label}
         </span>
-        {hint ? <span className='text-[11px] text-slate-500'>{hint}</span> : null}
+        {hint ? (
+          <span className='max-w-[64%] text-right text-[10.5px] text-stone-500'>{hint}</span>
+        ) : null}
       </div>
       {children}
     </div>
@@ -752,7 +749,7 @@ function Input({
 }) {
   return (
     <input
-      className='w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/60'
+      className='w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-[12px] text-white outline-none transition placeholder:text-stone-500 focus:border-stone-300/45'
       value={value}
       type={type}
       onChange={event => {
@@ -804,48 +801,48 @@ function LanguageCombobox({
       <div className='relative'>
         <ComboboxInput
           aria-label='Target language'
-          className='w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2.5 pr-9 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-300/60'
+          className='w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 pr-8 text-[12px] text-white outline-none transition placeholder:text-stone-500 focus:border-stone-300/45'
           displayValue={displayValue}
           onChange={event => {
             setQuery(event.target.value);
           }}
           placeholder='Search or type custom code'
         />
-        <ComboboxButton className='absolute inset-y-0 right-2 grid place-items-center text-slate-400 transition hover:text-slate-200'>
+        <ComboboxButton className='absolute inset-y-0 right-2 grid place-items-center text-stone-400 transition hover:text-stone-200'>
           <ChevronDown size={16} />
         </ComboboxButton>
         <ComboboxOptions
           anchor='bottom start'
-          className='relay-scroll z-20 mt-1 max-h-72 w-(--input-width) overflow-y-auto rounded-xl border border-white/10 bg-[rgba(10,15,26,0.96)] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.4)] backdrop-blur-2xl empty:hidden'
+          className='relay-scroll z-20 mt-1 max-h-72 w-(--input-width) overflow-y-auto rounded-xl border border-white/10 bg-[rgba(24,24,22,0.96)] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.4)] backdrop-blur-2xl empty:hidden'
         >
           {filtered.map(code => (
             <ComboboxOption
               key={code}
               value={code}
-              className='group flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-[13px] text-slate-200 transition data-focus:bg-white/8 data-selected:text-cyan-200'
+              className='group flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-[13px] text-stone-200 transition data-focus:bg-white/10 data-selected:text-stone-100'
             >
               <span className='flex items-center gap-2.5'>
-                <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-[0.08em] text-slate-400 group-data-selected:text-cyan-300'>
+                <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-[0.08em] text-stone-400 group-data-selected:text-stone-300'>
                   {code.toUpperCase()}
                 </span>
                 <span>{LANGUAGE_NAMES[code] ?? code}</span>
               </span>
               <Check
                 size={14}
-                className='text-cyan-300 opacity-0 group-data-selected:opacity-100'
+                className='text-stone-300 opacity-0 group-data-selected:opacity-100'
               />
             </ComboboxOption>
           ))}
           {showCreate ? (
             <ComboboxOption
               value={needle}
-              className='group mt-1 flex cursor-pointer items-center gap-2.5 rounded-lg border border-dashed border-white/10 px-2.5 py-2 text-[13px] text-slate-300 transition data-focus:border-cyan-300/40 data-focus:bg-white/6'
+              className='group mt-1 flex cursor-pointer items-center gap-2.5 rounded-lg border border-dashed border-white/10 px-2.5 py-2 text-[13px] text-stone-300 transition data-focus:border-stone-300/40 data-focus:bg-white/9'
             >
-              <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-[0.08em] text-cyan-300'>
+              <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-[0.08em] text-stone-300'>
                 {needle.toUpperCase()}
               </span>
               <span>
-                Use custom code &quot;<span className='text-cyan-200'>{needle}</span>&quot;
+                Use custom code &quot;<span className='text-stone-200'>{needle}</span>&quot;
               </span>
             </ComboboxOption>
           ) : null}
@@ -871,15 +868,7 @@ function PathField({
   return (
     <div className='flex gap-2'>
       <Input value={value} onChange={onChange} placeholder={placeholder} />
-      <button
-        type='button'
-        onClick={onPick}
-        aria-label={buttonLabel}
-        title={buttonLabel}
-        className='inline-flex h-10.5 w-10.5 items-center justify-center rounded-full border border-white/10 bg-white/4 text-slate-100 transition hover:bg-white/8'
-      >
-        <FolderSearch size={16} />
-      </button>
+      <IconButton label={buttonLabel} onClick={onPick} icon={<FolderSearch size={16} />} />
     </div>
   );
 }
@@ -896,10 +885,10 @@ function ToggleRow({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <div className='flex items-start justify-between gap-4 rounded-xl border border-white/8 bg-white/2 px-3.5 py-3'>
+    <div className='flex items-start justify-between gap-4 rounded-xl border border-white/8 bg-white/2 px-3 py-2.5'>
       <div className='grid gap-1'>
-        <span className='text-sm font-medium text-white'>{label}</span>
-        <span className='text-[13px] leading-5 text-slate-400'>{detail}</span>
+        <span className='text-[12.5px] font-medium text-white'>{label}</span>
+        <span className='text-[12px] leading-5 text-stone-400'>{detail}</span>
       </div>
       <Switch checked={checked} onChange={onChange} />
     </div>
@@ -926,27 +915,29 @@ function ModelsList({
       {models.map(model => (
         <article
           key={`${kind}-${model.path}`}
-          className='rounded-xl border border-white/8 bg-white/2 px-3 py-3 transition hover:bg-white/4'
+          className='rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 transition hover:border-white/12 hover:bg-white/7'
         >
           <div className='flex items-start justify-between gap-3'>
             <div className='min-w-0'>
-              <p className='truncate text-sm font-medium text-white'>
+              <p className='truncate text-[12.5px] font-medium text-white'>
                 {model.relativePath || model.name}
               </p>
-              <p className='mt-1 break-all text-[12.5px] text-slate-400'>{model.path}</p>
+              <p className='mt-1 break-all text-[11.5px] text-stone-400'>{model.path}</p>
             </div>
-            <span className={modelStateClass(model.state)}>{MODEL_STATE_LABELS[model.state]}</span>
+            <ModelStateBadge state={model.state} />
           </div>
-          <div className='mt-3 flex items-center justify-between gap-3'>
-            <span className='text-[11px] text-slate-500'>{formatModelSize(model.sizeBytes)}</span>
-            <button
-              type='button'
-              onClick={() => void onUse(kind, model)}
-              disabled={model.state === 'missing' || model.state === 'active'}
-              className='rounded-full border border-white/10 bg-white/4 px-3 py-1.5 text-[12px] font-medium text-slate-100 transition hover:bg-white/8 disabled:opacity-40'
-            >
-              {model.state === 'active' ? 'Selected' : 'Use model'}
-            </button>
+          <div className='mt-2 flex items-center justify-between gap-3'>
+            <span className='text-[10.5px] text-stone-500'>{formatModelSize(model.sizeBytes)}</span>
+            {model.state !== 'active' ? (
+              <button
+                type='button'
+                onClick={() => void onUse(kind, model)}
+                disabled={model.state === 'missing'}
+                className='rounded-lg border border-white/10 bg-white/4 px-3 py-1.5 text-[12px] font-medium text-stone-100 transition hover:border-white/14 hover:bg-white/10 disabled:opacity-40'
+              >
+                Use model
+              </button>
+            ) : null}
           </div>
         </article>
       ))}
@@ -958,20 +949,20 @@ function HealthMessage({ health, detail }: { health: ServiceHealth; detail: stri
   if (!detail) return null;
   const tone =
     health === 'ready'
-      ? 'border-emerald-400/15 bg-emerald-400/8 text-emerald-100'
+      ? 'border-emerald-500/15 bg-emerald-500/8 text-emerald-200'
       : health === 'degraded' || health === 'unavailable'
         ? 'border-rose-500/20 bg-rose-500/10 text-rose-100'
-        : 'border-white/8 bg-white/[0.02] text-slate-300';
+        : 'border-white/8 bg-white/[0.02] text-stone-300';
   return (
-    <div className={`rounded-xl border px-3 py-2.5 text-[12px] leading-5 ${tone}`}>{detail}</div>
+    <div className={`rounded-lg border px-2.5 py-2 text-[11.5px] leading-5 ${tone}`}>{detail}</div>
   );
 }
 
 function ShortcutRow({ label, value }: { label: string; value: string }) {
   return (
     <div className='flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/2 px-3 py-3'>
-      <span className='text-sm text-slate-200'>{label}</span>
-      <span className='rounded-lg bg-black/30 px-2.5 py-1 font-mono text-[12px] text-slate-300'>
+      <span className='text-[13px] text-stone-200'>{label}</span>
+      <span className='rounded-lg bg-black/30 px-2.5 py-1 font-mono text-[12px] text-stone-300'>
         {value}
       </span>
     </div>
@@ -991,7 +982,7 @@ function ActionRow({
     <button
       type='button'
       onClick={onClick}
-      className='flex items-center justify-between rounded-xl border border-white/8 bg-white/2 px-3 py-3 text-left text-sm text-slate-100 transition hover:bg-white/5'
+      className='flex items-center justify-between rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 text-left text-[12px] text-stone-100 transition hover:border-white/12 hover:bg-white/8'
     >
       <span className='inline-flex items-center gap-2'>
         {icon}
@@ -1004,16 +995,16 @@ function ActionRow({
 
 function MetricRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rounded-xl border border-white/8 bg-white/2 px-3 py-3'>
-      <p className='text-[11px] text-slate-500'>{label}</p>
-      <p className='mt-1 break-all text-sm text-slate-100'>{value}</p>
+    <div className='rounded-xl border border-white/8 bg-white/2 px-3 py-2.5'>
+      <p className='text-[10.5px] text-stone-500'>{label}</p>
+      <p className='mt-1 break-all text-[13px] text-stone-100'>{value}</p>
     </div>
   );
 }
 
 function InlineNote({ children }: PropsWithChildren) {
   return (
-    <div className='rounded-xl border border-white/8 bg-white/2 px-3.5 py-3 text-[13px] leading-6 text-slate-300'>
+    <div className='rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 text-[12px] leading-5 text-stone-300'>
       {children}
     </div>
   );
@@ -1021,7 +1012,7 @@ function InlineNote({ children }: PropsWithChildren) {
 
 function EmptyState({ text }: { text: string }) {
   return (
-    <div className='rounded-xl border border-dashed border-white/10 bg-white/1.5 px-4 py-8 text-center text-sm leading-6 text-slate-500'>
+    <div className='rounded-xl border border-transparent bg-transparent px-4 py-6 text-center text-[12px] leading-5 text-stone-500'>
       {text}
     </div>
   );
@@ -1029,7 +1020,7 @@ function EmptyState({ text }: { text: string }) {
 
 function TomlPreview({ content }: { content: string }) {
   return (
-    <pre className='relay-scroll max-h-130 overflow-auto rounded-xl border border-white/8 bg-black/30 px-4 py-3 font-mono text-[12px] leading-6 text-slate-300'>
+    <pre className='relay-scroll max-h-120 overflow-auto rounded-xl border border-white/8 bg-black/24 px-3.5 py-3 font-mono text-[11.5px] leading-5 text-stone-300'>
       <code>
         {content.split('\n').map((line, index) => (
           <span key={`${String(index)}-${line}`} className='block'>
@@ -1046,10 +1037,10 @@ function renderTomlLine(line: string) {
     return ' ';
   }
   if (line.trimStart().startsWith('#')) {
-    return <span className='text-slate-500'>{line}</span>;
+    return <span className='text-stone-500'>{line}</span>;
   }
   if (line.trimStart().startsWith('[') && line.trimEnd().endsWith(']')) {
-    return <span className='text-cyan-200'>{line}</span>;
+    return <span className='text-stone-200'>{line}</span>;
   }
 
   const separatorIndex = line.indexOf('=');
@@ -1061,19 +1052,18 @@ function renderTomlLine(line: string) {
   const value = line.slice(separatorIndex + 1);
   return (
     <>
-      <span className='text-sky-200'>{key}</span>
-      <span className='text-slate-500'>=</span>
-      <span className='text-slate-300'>{value}</span>
+      <span className='text-stone-200'>{key}</span>
+      <span className='text-stone-500'>=</span>
+      <span className='text-stone-300'>{value}</span>
     </>
   );
 }
 
-function modelStateClass(state: ModelRecord['state']) {
-  if (state === 'active') {
-    return 'rounded-full bg-emerald-400/15 px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-emerald-200';
-  }
-  if (state === 'missing') {
-    return 'rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-rose-200';
-  }
-  return 'rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-semibold tracking-[0.04em] text-slate-300';
+function ModelStateBadge({ state }: { state: ModelRecord['state'] }) {
+  const tone = state === 'active' ? 'success' : state === 'missing' ? 'danger' : 'neutral';
+  return (
+    <Badge tone={tone} className='text-[10px]'>
+      {MODEL_STATE_LABELS[state]}
+    </Badge>
+  );
 }

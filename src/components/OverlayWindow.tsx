@@ -2,6 +2,7 @@ import { AudioLines, Languages, X } from 'lucide-react';
 import { useEffect } from 'react';
 
 import { SegmentLogPanel } from '@/components/SegmentLogPanel';
+import { Badge } from '@/components/shared/Badge';
 import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
 import { LogoMark, WindowDragStrip } from '@/components/shared/WindowChrome';
 import { ToastViewport } from '@/components/ToastViewport';
@@ -34,10 +35,10 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
   const targetLanguage = snapshot?.settings.translation.targetLanguage ?? 'en';
 
   return (
-    <main className='flex h-screen w-screen flex-col overflow-hidden bg-transparent text-slate-50'>
+    <main className='flex h-screen w-screen flex-col overflow-hidden bg-transparent text-stone-50'>
       <WindowDragStrip />
-      <div className='flex min-h-0 flex-1 w-full overflow-hidden p-3'>
-        <section className='flex h-full w-full flex-col overflow-hidden rounded-[28px] border border-white/14 bg-[linear-gradient(145deg,rgba(10,14,24,0.78),rgba(16,20,38,0.62))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_40px_120px_rgba(0,0,0,0.45)] backdrop-blur-[36px] [clip-path:inset(0_round_28px)]'>
+      <div className='flex min-h-0 flex-1 w-full overflow-hidden p-2.5'>
+        <section className='flex h-full w-full flex-col overflow-hidden rounded-2xl border border-white/14 bg-[rgba(30,30,28,0.9)] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_24px_72px_rgba(0,0,0,0.36)] backdrop-blur-xl [clip-path:inset(0_round_16px)]'>
           <header
             data-tauri-drag-region
             className='flex items-center justify-between gap-4 border-b border-white/8 px-5 py-3.5'
@@ -45,7 +46,7 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
             <div className='flex min-w-0 items-center gap-3'>
               <LogoMark listening={isLive} shrink />
               <div className='flex min-w-0 items-center gap-2'>
-                <h1 className='mt-0.5 truncate text-sm font-medium tracking-tight text-white'>
+                <h1 className='mt-0.5 truncate text-[13px] font-medium text-white'>
                   Live transcription
                 </h1>
                 <StatusChip state={state} />
@@ -60,13 +61,12 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
             </div>
           </header>
 
-          <div className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden p-3'>
+          <div className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2.5 overflow-hidden p-2.5'>
             <SegmentLogPanel
               title='Original'
               language='EN'
               icon={<AudioLines size={16} />}
               entries={originalEntries}
-              compact
               live={isLive}
               onCopyError={reason => {
                 pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
@@ -86,7 +86,6 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
               language={targetLanguage}
               icon={<Languages size={16} />}
               entries={translationEntries}
-              compact
               live={isLive}
               onCopyError={reason => {
                 pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
@@ -116,17 +115,18 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
 function StatusChip({ state }: { state: ListeningState }) {
   const tone =
     state === 'listening'
-      ? 'bg-emerald-400/12 text-emerald-200'
+      ? 'success'
       : state === 'error'
-        ? 'bg-rose-500/15 text-rose-200'
+        ? 'danger'
         : state === 'starting' || state === 'stopping'
-          ? 'bg-amber-300/15 text-amber-200'
-          : 'bg-white/8 text-slate-300';
+          ? 'warning'
+          : 'neutral';
   return (
-    <span
-      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em] ${tone}`}
-    >
+    <Badge tone={tone} size='md'>
+      {state === 'listening' ? (
+        <span className='relay-dot-live block h-1.5 w-1.5 rounded-full bg-emerald-300' />
+      ) : null}
       {listeningStateLabel(state)}
-    </span>
+    </Badge>
   );
 }
