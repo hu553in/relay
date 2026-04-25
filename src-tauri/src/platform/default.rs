@@ -24,3 +24,5 @@ pub(crate) fn apply_settings_window_platform_behavior<'a>(
 pub(crate) fn apply_overlay_platform_behavior(_window: &WebviewWindow) -> Result<()> {
     Ok(())
 }
+
+pub(crate) fn sync_dock_visibility(_app: &AppHandle) {}

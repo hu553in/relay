@@ -260,6 +260,7 @@ impl RelayApp {
             guard.snapshot.settings.overlay.visible = true;
         }
         self.persist_settings()?;
+        self.sync_dock_visibility();
         self.emit_snapshot()
     }
 
@@ -274,6 +275,7 @@ impl RelayApp {
             guard.snapshot.settings.overlay.visible = false;
         }
         self.persist_settings()?;
+        self.sync_dock_visibility();
         self.emit_snapshot()
     }
 
@@ -282,6 +284,7 @@ impl RelayApp {
         window.show()?;
         window.unminimize()?;
         window.set_focus()?;
+        self.sync_dock_visibility();
         Ok(())
     }
 
@@ -290,13 +293,19 @@ impl RelayApp {
         window.show()?;
         window.unminimize()?;
         window.set_focus()?;
+        self.sync_dock_visibility();
         Ok(())
     }
 
     pub(crate) fn hide_settings(&self) -> Result<()> {
         let window = self.window(crate::windowing::SETTINGS.label, "settings")?;
         window.hide()?;
+        self.sync_dock_visibility();
         Ok(())
+    }
+
+    pub(crate) fn sync_dock_visibility(&self) {
+        crate::platform::sync_dock_visibility(&self.inner.app_handle);
     }
 
     pub(crate) fn show_settings_section(&self, section: &str) -> Result<()> {

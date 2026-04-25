@@ -56,6 +56,7 @@ fn run_inner() -> Result<()> {
                 if windowing::is_managed_window(window.label()) {
                     api.prevent_close();
                     let _ = window.hide();
+                    platform::sync_dock_visibility(window.app_handle());
                 }
             }
         })

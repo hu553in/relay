@@ -12,5 +12,6 @@ use default as platform_impl;
 
 pub(crate) use platform_impl::{
     apply_main_window_platform_behavior, apply_overlay_platform_behavior,
-    apply_settings_window_platform_behavior, configure_app_policy, system_audio_capability,
+    apply_settings_window_platform_behavior, configure_app_policy, sync_dock_visibility,
+    system_audio_capability,
 };

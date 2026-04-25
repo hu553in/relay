@@ -1,8 +1,9 @@
 use anyhow::Result;
 use cpal::traits::HostTrait;
-use tauri::{ActivationPolicy, AppHandle, WebviewWindow, WebviewWindowBuilder};
+use tauri::{ActivationPolicy, AppHandle, Manager, WebviewWindow, WebviewWindowBuilder};
 
 use crate::domain::SourceCapability;
+use crate::windowing;
 
 type WindowBuilder<'a> = WebviewWindowBuilder<'a, tauri::Wry, AppHandle>;
 
@@ -42,4 +43,26 @@ fn apply_hidden_titlebar(builder: WindowBuilder<'_>) -> WindowBuilder<'_> {
 pub(crate) fn apply_overlay_platform_behavior(window: &WebviewWindow) -> Result<()> {
     window.set_visible_on_all_workspaces(true)?;
     Ok(())
+}
+
+pub(crate) fn sync_dock_visibility(app: &AppHandle) {
+    let dock_visible = [windowing::MAIN.label, windowing::SETTINGS.label]
+        .iter()
+        .any(|label| {
+            app.get_webview_window(label)
+                .and_then(|window| window.is_visible().ok())
+                .unwrap_or(false)
+        });
+
+    let policy = if dock_visible {
+        ActivationPolicy::Regular
+    } else {
+        ActivationPolicy::Accessory
+    };
+    if let Err(error) = app.set_activation_policy(policy) {
+        tracing::warn!("failed to set activation policy: {error:#}");
+    }
+    if let Err(error) = app.set_dock_visibility(dock_visible) {
+        tracing::warn!("failed to set dock visibility: {error:#}");
+    }
 }
