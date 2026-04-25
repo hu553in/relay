@@ -3,6 +3,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::constants::{
+    DEFAULT_MAX_TOKENS, DEFAULT_TARGET_LANGUAGE, DEFAULT_TOGGLE_LISTENING_SHORTCUT,
+    DEFAULT_TOGGLE_OVERLAY_SHORTCUT,
+};
+
 const DEFAULT_TRANSLATION_MODEL_PATH: &str = "";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -18,7 +23,6 @@ pub enum ListeningState {
     Idle,
     Starting,
     Listening,
-    Stopping,
     Error,
 }
 
@@ -114,8 +118,8 @@ impl Default for TranslationSettings {
         Self {
             model_path: DEFAULT_TRANSLATION_MODEL_PATH.to_string(),
             selected_model: String::new(),
-            target_language: "en".to_string(),
-            max_tokens: 96,
+            target_language: DEFAULT_TARGET_LANGUAGE.to_string(),
+            max_tokens: DEFAULT_MAX_TOKENS,
         }
     }
 }
@@ -140,8 +144,8 @@ pub struct ShortcutSettings {
 impl Default for ShortcutSettings {
     fn default() -> Self {
         Self {
-            toggle_listening: "CmdOrCtrl+Shift+L".to_string(),
-            toggle_overlay: "CmdOrCtrl+Shift+O".to_string(),
+            toggle_listening: DEFAULT_TOGGLE_LISTENING_SHORTCUT.to_string(),
+            toggle_overlay: DEFAULT_TOGGLE_OVERLAY_SHORTCUT.to_string(),
         }
     }
 }

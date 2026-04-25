@@ -2,6 +2,8 @@ use anyhow::Result;
 use tauri::window::Color;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
+use crate::constants::{MAIN_WINDOW_LABEL, OVERLAY_WINDOW_LABEL, SETTINGS_WINDOW_LABEL};
+
 type WindowBuilder<'a> = WebviewWindowBuilder<'a, tauri::Wry, AppHandle>;
 
 pub(crate) struct WindowSpec {
@@ -25,7 +27,7 @@ pub(crate) struct OverlayWindowSpec {
 }
 
 pub(crate) const MAIN: WindowSpec = WindowSpec {
-    label: "main",
+    label: MAIN_WINDOW_LABEL,
     title: "Relay Controls",
     width: 1080.0,
     height: 720.0,
@@ -34,7 +36,7 @@ pub(crate) const MAIN: WindowSpec = WindowSpec {
 };
 
 pub(crate) const OVERLAY: OverlayWindowSpec = OverlayWindowSpec {
-    label: "overlay",
+    label: OVERLAY_WINDOW_LABEL,
     title: "Relay Overlay",
     width: 1080.0,
     height: 560.0,
@@ -45,7 +47,7 @@ pub(crate) const OVERLAY: OverlayWindowSpec = OverlayWindowSpec {
 };
 
 pub(crate) const SETTINGS: WindowSpec = WindowSpec {
-    label: "settings",
+    label: SETTINGS_WINDOW_LABEL,
     title: "Relay Settings",
     width: 980.0,
     height: 720.0,

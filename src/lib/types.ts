@@ -1,5 +1,22 @@
+export interface AppConstants {
+  defaultMaxTokens: number;
+  minGenerationTokens: number;
+  maxGenerationTokens: number;
+  defaultTargetLanguage: string;
+  defaultToggleListeningShortcut: string;
+  defaultToggleOverlayShortcut: string;
+  maxModelWalkDepth: number;
+  whisperModelExtensions: string[];
+  translationModelExtensions: string[];
+  mainWindowLabel: string;
+  overlayWindowLabel: string;
+  settingsWindowLabel: string;
+  snapshotEvent: string;
+  settingsNavigateEvent: string;
+}
+
 export type InputSource = 'microphone' | 'systemAudio';
-export type ListeningState = 'idle' | 'starting' | 'listening' | 'stopping' | 'error';
+export type ListeningState = 'idle' | 'starting' | 'listening' | 'error';
 export type ServiceHealth = 'unknown' | 'ready' | 'degraded' | 'unavailable';
 export type SegmentStatus = 'transcribed' | 'translating' | 'translated' | 'translationFailed';
 export type ModelKind = 'transcription' | 'translation';

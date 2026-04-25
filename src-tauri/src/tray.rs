@@ -8,7 +8,7 @@ use tauri::{Emitter, Manager};
 
 use crate::app::RelayApp;
 use crate::domain::AppSnapshot;
-use crate::{events, ids};
+use crate::ids;
 
 struct TrayMenuState {
     start: MenuItem<tauri::Wry>,
@@ -146,7 +146,9 @@ pub(crate) fn handle_menu_event(app: &AppHandle, menu_id: &str) -> Result<()> {
         ids::tray::SETTINGS => relay.show_settings(),
         ids::tray::ABOUT => relay.show_settings_section("about"),
         ids::tray::QUIT => {
-            relay.stop_listening().ok();
+            // Routed through RunEvent::ExitRequested in lib.rs so the same
+            // graceful shutdown runs for tray Quit, Cmd+Q, Apple menu Quit,
+            // dock right-click Quit, and OS logout/shutdown.
             app.exit(0);
             Ok(())
         }
@@ -168,7 +170,7 @@ pub(crate) fn handle_icon_event(app: &AppHandle, relay: &RelayApp, event: TrayIc
         }
     }
 
-    let _ = app.emit(events::EVENT_TRAY_PING, ());
+    let _ = app.emit(crate::constants::EVENT_TRAY_PING, ());
 }
 
 fn menu_item(app: &AppHandle, id: &str, text: &str) -> Result<MenuItem<tauri::Wry>> {

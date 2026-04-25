@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::constants::{
+    DEFAULT_MAX_TOKENS, DEFAULT_TARGET_LANGUAGE, DEFAULT_TOGGLE_LISTENING_SHORTCUT,
+    DEFAULT_TOGGLE_OVERLAY_SHORTCUT,
+};
 use crate::domain::{OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings};
 
 #[derive(Debug, Clone)]
@@ -64,7 +68,7 @@ impl SettingsStore {
         }
 
         let content = toml::to_string_pretty(&SettingsFile::from(settings))?;
-        fs::write(&self.path, content)
+        write_atomic(&self.path, content.as_bytes())
             .with_context(|| format!("write settings file {}", self.path.display()))
     }
 
@@ -252,20 +256,24 @@ const fn default_true() -> bool {
     true
 }
 
+// Thin wrappers around `crate::constants::*`. They exist only because
+// `serde(default = "...")` requires a function path, not a `const`. Each
+// wrapper reads a single value from the central constants module so the
+// settings file and the in-memory `Default` impls cannot drift.
 fn default_target_language() -> String {
-    "en".to_string()
+    DEFAULT_TARGET_LANGUAGE.to_string()
 }
 
 const fn default_max_tokens() -> u32 {
-    96
+    DEFAULT_MAX_TOKENS
 }
 
 fn default_toggle_listening() -> String {
-    "CmdOrCtrl+Shift+L".to_string()
+    DEFAULT_TOGGLE_LISTENING_SHORTCUT.to_string()
 }
 
 fn default_toggle_overlay() -> String {
-    "CmdOrCtrl+Shift+O".to_string()
+    DEFAULT_TOGGLE_OVERLAY_SHORTCUT.to_string()
 }
 
 fn parse_settings(content: &str) -> Result<RelaySettings, toml::de::Error> {
@@ -274,9 +282,45 @@ fn parse_settings(content: &str) -> Result<RelaySettings, toml::de::Error> {
     Ok(settings)
 }
 
+/// Write `bytes` to `path` atomically via temp file + rename. The temp file
+/// lives in the same directory as `path` so that `fs::rename` is a same-fs
+/// rename (atomic on POSIX; uses ReplaceFile/MoveFileEx with replace on
+/// Windows). On any error mid-write the original file at `path` is left
+/// untouched. Best-effort cleanup of the temp file on failure.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "settings path has no parent directory",
+        )
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("settings.toml");
+    // Suffix randomized to avoid collisions if two saves race; `.tmp.<uuid>`
+    // is also explicit enough that a leftover from a crash is recognizable.
+    let temp_path = parent.join(format!("{file_name}.tmp.{}", uuid::Uuid::new_v4()));
+
+    if let Err(error) = fs::write(&temp_path, bytes) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
+    }
+    if let Err(error) = fs::rename(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_settings;
+    use std::fs;
+
+    use uuid::Uuid;
+
+    use super::{parse_settings, write_atomic, SettingsFile, SettingsStore};
+    use crate::domain::RelaySettings;
 
     #[test]
     fn parses_sectioned_toml_settings() {
@@ -332,5 +376,71 @@ unknown_setting = true
         .expect_err("unknown fields should be rejected");
 
         assert!(error.to_string().contains("unknown_setting"));
+    }
+
+    /// Defaults must round-trip cleanly through serialize → parse to keep the
+    /// "open settings.toml in editor" UX honest. A field added without a
+    /// matching default would silently break existing settings files.
+    #[test]
+    fn defaults_round_trip_through_toml() {
+        let original = RelaySettings::default();
+        let rendered = toml::to_string_pretty(&SettingsFile::from(&original))
+            .expect("render defaults to TOML");
+        let parsed = parse_settings(&rendered).expect("parse rendered defaults");
+        assert_eq!(parsed, original);
+    }
+
+    /// `write_atomic` must leave the original file untouched on success and
+    /// must not leave temp files around. The temp-rename pattern is the whole
+    /// reason `save` was hardened — partial writes during a panic/crash were
+    /// previously possible with `fs::write`.
+    #[test]
+    fn atomic_write_replaces_existing_content_without_partial_state() {
+        let dir = std::env::temp_dir().join(format!("relay-settings-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp settings dir");
+        let path = dir.join("settings.toml");
+        fs::write(&path, b"original").expect("seed original file");
+
+        write_atomic(&path, b"replaced").expect("atomic write succeeds");
+
+        let actual = fs::read_to_string(&path).expect("read back");
+        assert_eq!(actual, "replaced");
+
+        // No leftover temp file siblings.
+        let leftovers = fs::read_dir(&dir)
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("settings.toml.tmp.")
+            })
+            .count();
+        assert_eq!(leftovers, 0, "no temp file siblings should remain");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Save then load must yield byte-identical settings — the contract that
+    /// makes the settings UI's "modify and persist" round-trip safe across
+    /// app restarts on any OS.
+    #[test]
+    fn save_then_load_round_trips_settings() {
+        let dir = std::env::temp_dir().join(format!("relay-settings-{}", Uuid::new_v4()));
+        let path = dir.join("settings.toml");
+        let store = SettingsStore { path };
+        let mut settings = RelaySettings::default();
+        settings.translation.target_language = "de".to_string();
+        settings.translation.max_tokens = 64;
+        settings.overlay.visible = false;
+
+        store.save(&settings).expect("save");
+        let loaded = store.load();
+
+        assert!(loaded.warning.is_none(), "{:?}", loaded.warning);
+        assert_eq!(loaded.settings, settings);
+
+        fs::remove_dir_all(&dir).ok();
     }
 }

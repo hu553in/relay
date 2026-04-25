@@ -9,11 +9,11 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
 
+use crate::constants::{EVENT_SETTINGS_NAVIGATE, EVENT_SNAPSHOT};
 use crate::domain::{
     AppPaths, AppSnapshot, DiagnosticsEntry, ListeningState, RelaySettings, SegmentRecord,
     SegmentStatus, ServiceHealth, SourceCapability, SourceState, SystemMetrics, TemperatureReading,
 };
-use crate::events::{EVENT_SETTINGS_NAVIGATE, EVENT_SNAPSHOT};
 use crate::models::{collect_models, validate_model_directory};
 use crate::pipeline::{start_pipeline, PipelineHandle};
 use crate::settings::SettingsStore;
@@ -173,14 +173,14 @@ impl RelayApp {
             } else if guard.pipeline.is_some()
                 || matches!(
                     guard.snapshot.listening_state,
-                    ListeningState::Starting | ListeningState::Listening | ListeningState::Stopping
+                    ListeningState::Starting | ListeningState::Listening
                 )
             {
                 Some(StartBlocker::AlreadyActive)
             } else {
                 guard.snapshot.listening_state = ListeningState::Starting;
                 guard.snapshot.active_session_id = Some(session_id);
-                guard.snapshot.session_started_at_ms = Some(now_ms());
+                guard.snapshot.session_started_at_ms = Some(crate::now_ms());
                 guard.snapshot.session_segment_count = 0;
                 guard.snapshot.session_translation_count = 0;
                 guard.snapshot.session_translation_failure_count = 0;
@@ -215,6 +215,7 @@ impl RelayApp {
     }
 
     pub(crate) fn stop_listening(&self) -> Result<()> {
+        tracing::info!("listening stop requested");
         let pipeline = {
             let mut guard = self.lock_state()?;
             let should_stop = guard.pipeline.is_some()
@@ -226,7 +227,7 @@ impl RelayApp {
                 return Ok(());
             }
 
-            guard.snapshot.listening_state = ListeningState::Stopping;
+            guard.snapshot.listening_state = ListeningState::Idle;
             guard.snapshot.active_session_id = None;
             guard.snapshot.microphone.capturing = false;
             guard.snapshot.system_audio.capturing = false;
@@ -235,14 +236,43 @@ impl RelayApp {
             guard.last_level_emit_at = None;
             guard.pipeline.take()
         };
-        self.emit_snapshot()?;
-
+        // Hand the pipeline off to the async runtime BEFORE any `?` returns so a
+        // failure in `emit_snapshot` / `push_diagnostic` cannot accidentally drop
+        // the handle on the caller thread (which would run cpal Stream::drop
+        // synchronously and re-introduce the original UI hang).
         if let Some(handle) = pipeline {
             handle.stop();
         }
-
-        self.set_listening_state(ListeningState::Idle, None)?;
+        self.emit_snapshot()?;
         self.push_diagnostic("info", "Listening stopped")?;
+
+        Ok(())
+    }
+
+    /// Synchronous shutdown for the quit path: returns only after pipeline teardown
+    /// (including in-flight Whisper transcribe spawn_blocking) actually finishes.
+    /// This is what prevents `app.exit(0)` from running ggml-metal static destructors
+    /// while Metal init dispatch blocks are still in flight.
+    pub(crate) async fn shutdown(&self) -> Result<()> {
+        tracing::info!("shutdown requested");
+        let pipeline = {
+            let mut guard = self.lock_state()?;
+            guard.snapshot.listening_state = ListeningState::Idle;
+            guard.snapshot.active_session_id = None;
+            guard.snapshot.microphone.capturing = false;
+            guard.snapshot.system_audio.capturing = false;
+            guard.snapshot.microphone.input_level = Some(0);
+            guard.snapshot.system_audio.input_level = Some(0);
+            guard.last_level_emit_at = None;
+            guard.pipeline.take()
+        };
+        // Best-effort UI update so a slow shutdown does not leave the controls
+        // window stuck on the previous "Listening" state. Failure is non-fatal
+        // because we are about to exit anyway.
+        let _ = self.emit_snapshot();
+        if let Some(handle) = pipeline {
+            handle.shutdown().await;
+        }
         Ok(())
     }
 
@@ -319,7 +349,7 @@ impl RelayApp {
     pub(crate) fn clear_transcript_log(&self) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
-            guard.snapshot.transcript_cleared_at_ms = Some(now_ms());
+            guard.snapshot.transcript_cleared_at_ms = Some(crate::now_ms());
         }
         self.emit_snapshot()
     }
@@ -327,7 +357,7 @@ impl RelayApp {
     pub(crate) fn clear_translation_log(&self) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
-            guard.snapshot.translation_cleared_at_ms = Some(now_ms());
+            guard.snapshot.translation_cleared_at_ms = Some(crate::now_ms());
         }
         self.emit_snapshot()
     }
@@ -623,7 +653,7 @@ impl RelayApp {
         tauri::async_runtime::spawn(async move {
             match start_pipeline(Arc::new(this.clone()), session_id).await {
                 Ok(handle) => {
-                    if let Ok(mut guard) = this.lock_state() {
+                    let stale_handle = if let Ok(mut guard) = this.lock_state() {
                         let session_is_current = guard.snapshot.active_session_id
                             == Some(session_id)
                             && !matches!(
@@ -632,9 +662,15 @@ impl RelayApp {
                             );
                         if session_is_current {
                             guard.pipeline = Some(handle);
+                            None
                         } else {
-                            handle.stop();
+                            Some(handle)
                         }
+                    } else {
+                        Some(handle)
+                    };
+                    if let Some(handle) = stale_handle {
+                        handle.stop();
                     }
                     let _ = this.emit_snapshot();
                 }
@@ -826,7 +862,7 @@ impl SystemProbe {
 
         let process = self.pid.and_then(|pid| self.system.process(pid));
         SystemMetrics {
-            collected_at_ms: now_ms(),
+            collected_at_ms: crate::now_ms(),
             cpu_logical_cores: self.system.cpus().len(),
             system_cpu_usage: self.system.global_cpu_usage(),
             process_cpu_usage: process.map(|value| value.cpu_usage()),
@@ -857,7 +893,7 @@ impl SystemProbe {
 fn diagnostic_entry(level: impl Into<String>, message: impl Into<String>) -> DiagnosticsEntry {
     DiagnosticsEntry {
         id: Uuid::new_v4(),
-        timestamp_ms: now_ms(),
+        timestamp_ms: crate::now_ms(),
         level: level.into(),
         message: message.into(),
     }
@@ -897,11 +933,4 @@ fn apply_source_capability(source: &mut SourceState, capability: SourceCapabilit
         source.input_level = Some(0);
         source.health = ServiceHealth::Unavailable;
     }
-}
-
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|value| value.as_millis() as u64)
-        .unwrap_or_default()
 }

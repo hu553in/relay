@@ -13,8 +13,11 @@ use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
 use serde_json::json;
 
+use crate::constants::{
+    MAX_GENERATION_TOKENS, MIN_GENERATION_TOKENS, TRANSLATION_MODEL_EXTENSIONS,
+};
 use crate::domain::{ServiceHealth, TranslationSettings};
-use crate::models::{validate_model_file_extension, TRANSLATION_MODEL_EXTENSIONS};
+use crate::models::validate_model_file_extension;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TranslationHealthReport {
@@ -69,6 +72,14 @@ fn translate_blocking(
     settings: TranslationSettings,
     request: TranslationRequest,
 ) -> Result<String> {
+    // Empty input means upstream produced no transcript to translate; do not
+    // pay the cost of locking the runtime, decoding a prompt, or waking the
+    // model. Returning an empty string keeps the contract of "translation of
+    // nothing is nothing" without surfacing a misleading error.
+    if request.text.trim().is_empty() {
+        return Ok(String::new());
+    }
+
     let runtime_lock = runtime_state()
         .lock()
         .map_err(|_| anyhow!("llama.cpp runtime lock poisoned"))?;
@@ -256,7 +267,13 @@ fn generate_translation(
     settings: &TranslationSettings,
     prompt: &str,
 ) -> Result<String> {
-    let max_tokens = settings.max_tokens.max(1);
+    // Clamp on both ends using the central constants. MIN_GENERATION_TOKENS
+    // (1) rejects 0-token requests that would always produce the empty-
+    // translation error below; MAX_GENERATION_TOKENS bounds memory/latency
+    // regardless of what's in settings.toml.
+    let max_tokens = settings
+        .max_tokens
+        .clamp(MIN_GENERATION_TOKENS, MAX_GENERATION_TOKENS);
     let context_params = LlamaContextParams::default()
         .with_n_ctx(NonZeroU32::new(2048))
         .with_n_batch(2048)
@@ -326,7 +343,8 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::{check_settings_blocking, runtime_state};
+    use super::{check_settings_blocking, runtime_state, translate_blocking, TranslationRequest};
+    use crate::constants::DEFAULT_TARGET_LANGUAGE;
     use crate::domain::{ServiceHealth, TranslationSettings};
 
     #[test]
@@ -346,5 +364,23 @@ mod tests {
         assert!(report.detail.contains("busy"));
 
         fs::remove_dir_all(root).ok();
+    }
+
+    /// Empty / whitespace-only input must short-circuit before touching the
+    /// llama.cpp runtime. Otherwise an empty transcript would acquire the
+    /// runtime lock, attempt to load the (likely missing) model, and surface
+    /// a misleading "model not selected" error to the user.
+    #[test]
+    fn empty_input_short_circuits_without_loading_runtime() {
+        let request = TranslationRequest {
+            text: "   \n\t".to_string(),
+            target_language: DEFAULT_TARGET_LANGUAGE.to_string(),
+        };
+        // Settings with an unselected model would normally error out; this
+        // test passes only because we never reach the runtime path.
+        let settings = TranslationSettings::default();
+
+        let result = translate_blocking(settings, request).expect("empty input is Ok");
+        assert!(result.is_empty());
     }
 }

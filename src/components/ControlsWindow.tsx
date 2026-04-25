@@ -101,7 +101,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
 
   const state = snapshot.listeningState;
   const isListening = state === 'listening';
-  const isBusy = state === 'starting' || state === 'stopping';
+  const isBusy = state === 'starting';
   const canStartListening = snapshot.sttHealth === 'ready';
 
   async function run(action: () => Promise<unknown>) {
@@ -167,11 +167,9 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                   <span>
                     {state === 'starting'
                       ? 'Starting...'
-                      : state === 'stopping'
-                        ? 'Stopping...'
-                        : isListening
-                          ? 'Stop listening'
-                          : 'Start listening'}
+                      : isListening
+                        ? 'Stop listening'
+                        : 'Start listening'}
                   </span>
                 </PrimaryButton>
               </div>
@@ -442,12 +440,7 @@ function LiveBadge({ state }: { state: ListeningState }) {
       </Badge>
     );
   }
-  const tone =
-    state === 'error'
-      ? 'danger'
-      : state === 'starting' || state === 'stopping'
-        ? 'warning'
-        : 'neutral';
+  const tone = state === 'error' ? 'danger' : state === 'starting' ? 'warning' : 'neutral';
 
   return (
     <Badge tone={tone} size='md'>

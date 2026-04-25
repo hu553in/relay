@@ -6,6 +6,7 @@ import { Badge } from '@/components/shared/Badge';
 import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
 import { LogoMark, WindowDragStrip } from '@/components/shared/WindowChrome';
 import { ToastViewport } from '@/components/ToastViewport';
+import { useAppConstants } from '@/hooks/useAppConstants';
 import { useSegmentLogEntries } from '@/hooks/useSegmentLogEntries';
 import { useToastCenter } from '@/hooks/useToastCenter';
 import { toErrorMessage } from '@/lib/errors';
@@ -17,6 +18,7 @@ const OVERLAY_MAX_ROWS = 28;
 
 export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
   const snapshot = relay.snapshot;
+  const constants = useAppConstants();
   const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics ?? []);
   const { originalEntries, translationEntries } = useSegmentLogEntries(snapshot, {
     idPrefix: 'overlay-',
@@ -24,15 +26,18 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
   });
 
   useEffect(() => {
+    document.body.classList.remove('bg-relay-bg');
     document.body.classList.add('bg-transparent');
     return () => {
       document.body.classList.remove('bg-transparent');
+      document.body.classList.add('bg-relay-bg');
     };
   }, []);
 
   const state = snapshot?.listeningState ?? 'idle';
   const isLive = state === 'listening';
-  const targetLanguage = snapshot?.settings.translation.targetLanguage ?? 'en';
+  const targetLanguage =
+    snapshot?.settings.translation.targetLanguage ?? constants.defaultTargetLanguage;
 
   return (
     <main className='flex h-screen w-screen flex-col overflow-hidden bg-transparent text-stone-50'>
@@ -118,7 +123,7 @@ function StatusChip({ state }: { state: ListeningState }) {
       ? 'success'
       : state === 'error'
         ? 'danger'
-        : state === 'starting' || state === 'stopping'
+        : state === 'starting'
           ? 'warning'
           : 'neutral';
   return (

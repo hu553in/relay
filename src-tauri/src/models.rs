@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+use crate::constants::{
+    MAX_MODEL_WALK_DEPTH, TRANSLATION_MODEL_EXTENSIONS, WHISPER_MODEL_EXTENSIONS,
+};
 use crate::domain::{normalize_model_reference, ModelKind, ModelRecord, ModelState, RelaySettings};
-
-pub(crate) const WHISPER_MODEL_EXTENSIONS: &[&str] = &["bin"];
-pub(crate) const TRANSLATION_MODEL_EXTENSIONS: &[&str] = &["gguf"];
 
 pub(crate) fn collect_models(settings: &RelaySettings) -> Vec<ModelRecord> {
     let mut candidates = BTreeMap::<(ModelKind, String), ModelRecord>::new();
@@ -102,8 +102,21 @@ fn collect_model_candidates(
         return;
     }
 
-    let mut pending = vec![root.to_path_buf()];
-    while let Some(directory) = pending.pop() {
+    // Walk the tree iteratively with two guards:
+    //   * `depth` ceiling so an accidental root selection (e.g. `/`) cannot
+    //     descend the whole filesystem.
+    //   * `visited` set keyed on canonical paths to break symlink cycles —
+    //     common on Linux (`/proc`, `/sys`) and macOS (`/var` -> `/private/var`).
+    // Using `entry.file_type()` (without following) plus canonicalize on
+    // descent means a symlink to an already-visited directory is silently
+    // skipped instead of looping.
+    let mut pending: Vec<(PathBuf, usize)> = vec![(root.to_path_buf(), 0)];
+    let mut visited: HashSet<PathBuf> = HashSet::new();
+    if let Ok(canonical) = fs::canonicalize(root) {
+        visited.insert(canonical);
+    }
+
+    while let Some((directory, depth)) = pending.pop() {
         let Ok(entries) = fs::read_dir(&directory) else {
             continue;
         };
@@ -114,8 +127,18 @@ fn collect_model_candidates(
                 continue;
             };
 
-            if file_type.is_dir() {
-                pending.push(path);
+            if file_type.is_dir() || file_type.is_symlink() {
+                if depth + 1 > MAX_MODEL_WALK_DEPTH {
+                    continue;
+                }
+                let canonical = match fs::canonicalize(&path) {
+                    Ok(value) => value,
+                    Err(_) => continue,
+                };
+                if !visited.insert(canonical) {
+                    continue;
+                }
+                pending.push((path, depth + 1));
                 continue;
             }
 
@@ -275,6 +298,39 @@ mod tests {
         assert_eq!(models[0].state, ModelState::Missing);
 
         fs::remove_dir_all(root).ok();
+    }
+
+    /// Symlink loop must not hang or stack-overflow `collect_models`. Without
+    /// the canonical-visited guard, a symlink pointing back to the root would
+    /// recurse until depth ceiling, but combined with multiple sibling loops
+    /// the work fans out exponentially. With the guard it stops on first
+    /// re-visit. Unix-only because creating symlinks portably across CI
+    /// (especially Windows without admin) is fiddly and the guard is OS-
+    /// agnostic — the canonicalization codepath is the same on every OS.
+    #[cfg(unix)]
+    #[test]
+    fn symlink_cycle_does_not_loop_forever() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("relay-models-{}", Uuid::new_v4()));
+        fs::create_dir_all(root.join("nested")).expect("create nested dir");
+        fs::write(root.join("nested/qwen.gguf"), b"stub").expect("seed model");
+        // Self-loop: nested/loop -> root.
+        symlink(&root, root.join("nested/loop")).expect("create symlink loop");
+
+        let mut settings = RelaySettings::default();
+        settings.translation.model_path = root.to_string_lossy().to_string();
+
+        let models = collect_models(&settings);
+        // Exactly one record for qwen.gguf, regardless of how many times the
+        // loop would have re-discovered it.
+        let translation_count = models
+            .iter()
+            .filter(|m| m.kind == ModelKind::Translation)
+            .count();
+        assert_eq!(translation_count, 1);
+
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

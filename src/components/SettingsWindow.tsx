@@ -37,17 +37,12 @@ import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
 import { Switch } from '@/components/shared/Switch';
 import { WindowDragStrip, WindowShell } from '@/components/shared/WindowChrome';
 import { ToastViewport } from '@/components/ToastViewport';
+import { useAppConstants } from '@/hooks/useAppConstants';
 import { useToastCenter } from '@/hooks/useToastCenter';
 import { diagnosticLevelTone } from '@/lib/diagnostics';
 import { toErrorMessage } from '@/lib/errors';
 import { formatModelSize } from '@/lib/format';
-import {
-  clearDiagnostics,
-  getAppPaths,
-  getConfigPreview,
-  SETTINGS_NAVIGATE_EVENT,
-  updateSettings,
-} from '@/lib/relay';
+import { clearDiagnostics, getAppPaths, getConfigPreview, updateSettings } from '@/lib/relay';
 import type {
   AppPaths,
   ModelKind,
@@ -85,7 +80,23 @@ const LANGUAGE_NAMES: Record<string, string> = {
   zh: '中文',
 };
 
-const COMMON_LANGUAGES = Object.keys(LANGUAGE_NAMES);
+// Explicit order instead of relying on `Object.keys` insertion order.
+const COMMON_LANGUAGES = [
+  'en',
+  'de',
+  'es',
+  'fr',
+  'it',
+  'ja',
+  'ko',
+  'nl',
+  'pl',
+  'pt',
+  'ru',
+  'tr',
+  'uk',
+  'zh',
+];
 
 interface SectionDescriptor {
   id: SettingsSection;
@@ -156,6 +167,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const [version, setVersion] = useState('0.1.0');
   const [configPreview, setConfigPreview] = useState('');
   const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
+  const constants = useAppConstants();
   const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics ?? []);
 
   useEffect(() => {
@@ -176,7 +188,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
       if (mounted) setAppPaths(value);
     });
 
-    void listen<string>(SETTINGS_NAVIGATE_EVENT, event => {
+    void listen<string>(constants.settingsNavigateEvent, event => {
       const nextSection = SECTION_ITEMS.find(item => item.id === event.payload)?.id ?? 'inputs';
       setActiveSection(nextSection);
     }).then(cleanup => {
@@ -191,7 +203,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
       mounted = false;
       unlisten?.();
     };
-  }, []);
+  }, [constants.settingsNavigateEvent]);
 
   const settings = snapshot?.settings;
   const allModels = snapshot?.models;
@@ -366,7 +378,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   <HealthMessage health={snapshot.sttHealth} detail={snapshot.sttDetail} />
                   <Field
                     label='Whisper models directory'
-                    hint='App scans this folder and all subfolders for .bin files. Press Enter or click away to save manual edits.'
+                    hint={`App scans this folder and all subfolders (up to ${String(constants.maxModelWalkDepth)} levels deep) for ${constants.whisperModelExtensions.map(e => `.${e}`).join(', ')} files. Symlink loops are skipped automatically. Press Enter or click away to save manual edits.`}
                   >
                     <PathInputField
                       value={settings.sttModelPath}
@@ -385,9 +397,10 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <InlineNote>
-                    Whisper GGML *.bin models are supported here. Multilingual models cover many
-                    languages. English-only variants (with &quot;en&quot; in name) are faster, but
-                    they will not handle mixed or non-English speech.
+                    Whisper GGML *.{constants.whisperModelExtensions.join(', *.')} models are
+                    supported here. Multilingual models cover many languages. English-only variants
+                    (with &quot;en&quot; in name) are faster, but they will not handle mixed or
+                    non-English speech.
                   </InlineNote>
                   <ActionRow
                     label='Browse Whisper transcription models on Hugging Face'
@@ -424,7 +437,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   </Field>
                   <Field
                     label='Translation models directory'
-                    hint='App scans this folder and all subfolders for .gguf files. Press Enter or click away to save manual edits.'
+                    hint={`App scans this folder and all subfolders (up to ${String(constants.maxModelWalkDepth)} levels deep) for ${constants.translationModelExtensions.map(e => `.${e}`).join(', ')} files. Symlink loops are skipped automatically. Press Enter or click away to save manual edits.`}
                   >
                     <PathInputField
                       value={settings.translation.modelPath}
@@ -443,7 +456,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   </Field>
                   <Field
                     label='Max tokens'
-                    hint='Max generated translation tokens per segment. Lower is faster. Higher helps longer sentences.'
+                    hint={`Max generated translation tokens per segment (${String(constants.minGenerationTokens)} to ${String(constants.maxGenerationTokens)}). Lower is faster. Higher helps longer sentences. Values outside this range are clamped.`}
                   >
                     <MaxTokensField
                       value={settings.translation.maxTokens}

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -89,126 +88,123 @@ fn build_stream(
         InputSource::Microphone => "Microphone",
         InputSource::SystemAudio => "System audio",
     };
-    let error_handler = on_error.clone();
-    let err_handler = move |error| {
-        error_handler(source, format!("{source_label} stream failed: {error}"));
-    };
-
     let stream_config: StreamConfig = config.clone().into();
+    // Each branch is structurally identical: capture samples → fold to mono
+    // f32 → push into the bounded channel. The duplication is collapsed with a
+    // macro because cpal's `build_input_stream` is generic over the sample type
+    // and cannot be easily abstracted into a helper without trait juggling.
+    // Cross-platform: ALSA on Linux commonly delivers I32 even when
+    // WASAPI/CoreAudio settle on F32 — refusing I32 here would silently kill
+    // mic capture on Linux.
+    macro_rules! build_stream_arm {
+        ($ty:ident, $conv:expr) => {{
+            let tx = tx.clone();
+            let on_error = on_error.clone();
+            device
+                .build_input_stream(
+                    &stream_config,
+                    move |data: &[$ty], _| {
+                        let chunk = RawAudioChunk {
+                            source,
+                            captured_at_ms: crate::now_ms(),
+                            sample_rate,
+                            samples: fold_to_mono(data, channels, $conv),
+                        };
+                        let _ = tx.try_send(chunk);
+                    },
+                    move |error| on_error(source, format!("{source_label} stream failed: {error}")),
+                    None,
+                )
+                .with_context(|| format!("build {} {source_label} stream", stringify!($ty)))
+        }};
+    }
+
     match config.sample_format() {
-        SampleFormat::F32 => device
-            .build_input_stream(
-                &stream_config,
-                move |data: &[f32], _| {
-                    let chunk = RawAudioChunk {
-                        source,
-                        captured_at_ms: now_ms(),
-                        sample_rate,
-                        samples: fold_to_mono_f32(data, channels),
-                    };
-                    let _ = tx.try_send(chunk);
-                },
-                err_handler,
-                None,
-            )
-            .with_context(|| format!("build f32 {source_label} stream")),
-        SampleFormat::I16 => {
-            let tx = tx.clone();
-            let on_error = on_error.clone();
-            device
-                .build_input_stream(
-                    &stream_config,
-                    move |data: &[i16], _| {
-                        let chunk = RawAudioChunk {
-                            source,
-                            captured_at_ms: now_ms(),
-                            sample_rate,
-                            samples: fold_to_mono_i16(data, channels),
-                        };
-                        let _ = tx.try_send(chunk);
-                    },
-                    move |error| on_error(source, format!("{source_label} stream failed: {error}")),
-                    None,
-                )
-                .with_context(|| format!("build i16 {source_label} stream"))
-        }
+        SampleFormat::F32 => build_stream_arm!(f32, |s| s),
+        SampleFormat::F64 => build_stream_arm!(f64, |s| s as f32),
+        SampleFormat::I32 => build_stream_arm!(i32, |s| s as f32 / i32::MAX as f32),
+        SampleFormat::I16 => build_stream_arm!(i16, |s| s as f32 / i16::MAX as f32),
+        SampleFormat::I8 => build_stream_arm!(i8, |s| s as f32 / i8::MAX as f32),
         SampleFormat::U16 => {
-            let tx = tx.clone();
-            let on_error = on_error.clone();
-            device
-                .build_input_stream(
-                    &stream_config,
-                    move |data: &[u16], _| {
-                        let chunk = RawAudioChunk {
-                            source,
-                            captured_at_ms: now_ms(),
-                            sample_rate,
-                            samples: fold_to_mono_u16(data, channels),
-                        };
-                        let _ = tx.try_send(chunk);
-                    },
-                    move |error| on_error(source, format!("{source_label} stream failed: {error}")),
-                    None,
-                )
-                .with_context(|| format!("build u16 {source_label} stream"))
+            build_stream_arm!(u16, |s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
         }
-        format => Err(anyhow!(
-            "Unsupported {source_label} sample format: {format:?}"
-        )),
+        SampleFormat::U8 => {
+            build_stream_arm!(u8, |s| (s as f32 / u8::MAX as f32) * 2.0 - 1.0)
+        }
+        format => {
+            // `tx` and `on_error` are captured in every other arm via clone;
+            // here they fall out of scope unused — fine, no warning.
+            let _ = (&tx, &on_error);
+            Err(anyhow!(
+                "Unsupported {source_label} sample format: {format:?}"
+            ))
+        }
     }
 }
 
-fn fold_to_mono_f32(data: &[f32], channels: usize) -> Vec<f32> {
-    if channels <= 1 {
-        return data.to_vec();
+/// Generic mono fold. `convert` normalizes one sample (any cpal type) to f32
+/// in `[-1.0, 1.0]`. Two important invariants:
+///
+///   * `channels == 0` would be a configuration bug from cpal; we treat it
+///     as "interleaving unknown, return empty" rather than panicking on
+///     `chunks(0)` or dividing by zero.
+///   * The trailing partial frame from `data.chunks(channels)` is averaged
+///     by its actual length, not `channels`, so a truncated tail does not
+///     bias toward zero.
+fn fold_to_mono<T: Copy>(data: &[T], channels: usize, convert: impl Fn(T) -> f32) -> Vec<f32> {
+    if channels == 0 {
+        return Vec::new();
     }
-
-    data.chunks(channels)
-        .map(|frame| frame.iter().copied().sum::<f32>() / frame.len() as f32)
-        .collect()
-}
-
-fn fold_to_mono_i16(data: &[i16], channels: usize) -> Vec<f32> {
-    if channels <= 1 {
-        return data
-            .iter()
-            .map(|sample| *sample as f32 / i16::MAX as f32)
-            .collect();
+    if channels == 1 {
+        return data.iter().copied().map(convert).collect();
     }
-
     data.chunks(channels)
         .map(|frame| {
-            let sum = frame
-                .iter()
-                .map(|sample| *sample as f32 / i16::MAX as f32)
-                .sum::<f32>();
+            let sum: f32 = frame.iter().copied().map(&convert).sum();
             sum / frame.len() as f32
         })
         .collect()
 }
 
-fn fold_to_mono_u16(data: &[u16], channels: usize) -> Vec<f32> {
-    if channels <= 1 {
-        return data
-            .iter()
-            .map(|sample| (*sample as f32 / u16::MAX as f32) * 2.0 - 1.0)
-            .collect();
+#[cfg(test)]
+mod tests {
+    use super::fold_to_mono;
+
+    #[test]
+    fn mono_input_is_passed_through_with_conversion() {
+        let data: [i16; 4] = [0, i16::MAX, -i16::MAX, i16::MAX / 2];
+        let folded = fold_to_mono(&data, 1, |s| s as f32 / i16::MAX as f32);
+        assert_eq!(folded.len(), 4);
+        assert!((folded[0] - 0.0).abs() < 1e-6);
+        assert!((folded[1] - 1.0).abs() < 1e-6);
+        assert!((folded[2] - -1.0).abs() < 1e-6);
+        assert!((folded[3] - 0.5).abs() < 1e-3);
     }
 
-    data.chunks(channels)
-        .map(|frame| {
-            let sum = frame
-                .iter()
-                .map(|sample| (*sample as f32 / u16::MAX as f32) * 2.0 - 1.0)
-                .sum::<f32>();
-            sum / frame.len() as f32
-        })
-        .collect()
-}
+    #[test]
+    fn stereo_frames_average_to_mono() {
+        // Two frames: [-1.0, 1.0] -> 0.0, and [0.5, 0.5] -> 0.5.
+        let data = [-1.0_f32, 1.0, 0.5, 0.5];
+        let folded = fold_to_mono(&data, 2, |s| s);
+        assert_eq!(folded, vec![0.0, 0.5]);
+    }
 
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_millis() as u64)
-        .unwrap_or_default()
+    /// Trailing partial frame must average by its actual length, not by the
+    /// nominal channel count. Otherwise truncated tails skew silent on every
+    /// callback boundary that doesn't divide evenly.
+    #[test]
+    fn trailing_partial_frame_uses_its_own_length() {
+        let data = [1.0_f32, 1.0, 1.0]; // channels=2, last frame has only 1 sample
+        let folded = fold_to_mono(&data, 2, |s| s);
+        assert_eq!(folded, vec![1.0, 1.0]);
+    }
+
+    /// `channels == 0` is a defensive guard against a misconfigured cpal
+    /// stream; we must not panic with `chunks(0)` or divide by zero.
+    #[test]
+    fn zero_channels_returns_empty_without_panicking() {
+        let data = [1.0_f32, 2.0, 3.0];
+        let folded = fold_to_mono(&data, 0, |s| s);
+        assert!(folded.is_empty());
+    }
 }

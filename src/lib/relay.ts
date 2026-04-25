@@ -1,9 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { AppPaths, AppSnapshot, RelaySettings, SystemMetrics } from './types';
-
-export const SNAPSHOT_EVENT = 'relay://snapshot';
-export const SETTINGS_NAVIGATE_EVENT = 'relay://settings-navigate';
+import type { AppConstants, AppPaths, AppSnapshot, RelaySettings, SystemMetrics } from './types';
 
 export function getSnapshot() {
   return invoke<AppSnapshot>('get_snapshot');
@@ -67,4 +64,8 @@ export function getAppPaths() {
 
 export function getSystemMetrics() {
   return invoke<SystemMetrics>('get_system_metrics');
+}
+
+export function getAppConstants() {
+  return invoke<AppConstants>('get_app_constants');
 }

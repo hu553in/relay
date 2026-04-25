@@ -1,8 +1,9 @@
 import { listen } from '@tauri-apps/api/event';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 
+import { useAppConstants } from '@/hooks/useAppConstants';
 import { toErrorMessage } from '@/lib/errors';
-import { getSnapshot, SNAPSHOT_EVENT } from '@/lib/relay';
+import { getSnapshot } from '@/lib/relay';
 import type { AppSnapshot, RelaySnapshotState } from '@/lib/types';
 
 export function useRelaySnapshot(): RelaySnapshotState {
@@ -10,6 +11,7 @@ export function useRelaySnapshot(): RelaySnapshotState {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const bootstrappedRef = useRef(false);
+  const constants = useAppConstants();
 
   const load = useEffectEvent(async () => {
     try {
@@ -28,7 +30,7 @@ export function useRelaySnapshot(): RelaySnapshotState {
     let unlisten: (() => void) | undefined;
 
     void (async () => {
-      const cleanup = await listen<AppSnapshot>(SNAPSHOT_EVENT, event => {
+      const cleanup = await listen<AppSnapshot>(constants.snapshotEvent, event => {
         if (!state.mounted) {
           return;
         }
@@ -51,7 +53,7 @@ export function useRelaySnapshot(): RelaySnapshotState {
       state.mounted = false;
       unlisten?.();
     };
-  }, [load]);
+  }, [load, constants.snapshotEvent]);
 
   return {
     snapshot,

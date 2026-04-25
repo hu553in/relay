@@ -1,17 +1,81 @@
+#[cfg(not(target_os = "macos"))]
+mod default;
 #[cfg(target_os = "macos")]
 mod macos;
 
-#[cfg(not(target_os = "macos"))]
-mod default;
+use anyhow::Result;
+use tauri::{AppHandle, WebviewWindow, WebviewWindowBuilder};
 
-#[cfg(target_os = "macos")]
-use macos as platform_impl;
+use crate::domain::SourceCapability;
 
-#[cfg(not(target_os = "macos"))]
-use default as platform_impl;
+type WindowBuilder<'a> = WebviewWindowBuilder<'a, tauri::Wry, AppHandle>;
 
-pub(crate) use platform_impl::{
-    apply_main_window_platform_behavior, apply_overlay_platform_behavior,
-    apply_settings_window_platform_behavior, configure_app_policy, sync_dock_visibility,
-    system_audio_capability,
-};
+pub(crate) fn system_audio_capability() -> SourceCapability {
+    #[cfg(target_os = "macos")]
+    {
+        macos::system_audio_capability()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::system_audio_capability()
+    }
+}
+
+pub(crate) fn configure_app_policy(app: &mut tauri::App) {
+    #[cfg(target_os = "macos")]
+    {
+        macos::configure_app_policy(app)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::configure_app_policy(app)
+    }
+}
+
+pub(crate) fn apply_main_window_platform_behavior<'a>(
+    builder: WindowBuilder<'a>,
+) -> WindowBuilder<'a> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::apply_main_window_platform_behavior(builder)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::apply_main_window_platform_behavior(builder)
+    }
+}
+
+pub(crate) fn apply_settings_window_platform_behavior<'a>(
+    builder: WindowBuilder<'a>,
+) -> WindowBuilder<'a> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::apply_settings_window_platform_behavior(builder)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::apply_settings_window_platform_behavior(builder)
+    }
+}
+
+pub(crate) fn apply_overlay_platform_behavior(window: &WebviewWindow) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::apply_overlay_platform_behavior(window)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::apply_overlay_platform_behavior(window)
+    }
+}
+
+pub(crate) fn sync_dock_visibility(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        macos::sync_dock_visibility(app)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::sync_dock_visibility(app)
+    }
+}

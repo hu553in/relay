@@ -31,14 +31,38 @@ pub(crate) struct PipelineHandle {
 }
 
 impl PipelineHandle {
+    /// Fire-and-forget teardown. cpal Stream Drop is blocking on macOS, so we move the
+    /// whole shutdown onto the async runtime so the caller does not stall.
     pub(crate) fn stop(self) {
-        drop(self.microphone);
-        drop(self.system_audio);
-        drop(self.audio_tx);
-        self.audio_task.abort();
-        // In-flight llama.cpp work runs inside spawn_blocking and may finish after this abort.
-        // Session guards prevent late native results from mutating the current snapshot.
-        self.translation_task.abort();
+        tauri::async_runtime::spawn(self.shutdown());
+    }
+
+    /// Awaitable teardown. Drops cpal streams on the blocking pool, then awaits the
+    /// async tasks so any in-flight `spawn_blocking` (Whisper transcribe) actually
+    /// finishes before this returns. Required before `app.exit` to avoid racing
+    /// ggml-metal teardown against pending Metal init dispatch blocks.
+    pub(crate) async fn shutdown(self) {
+        tracing::info!("pipeline teardown started");
+        let PipelineHandle {
+            audio_tx,
+            audio_task,
+            translation_task,
+            microphone,
+            system_audio,
+        } = self;
+
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            drop(microphone);
+            drop(system_audio);
+            drop(audio_tx);
+        })
+        .await;
+
+        audio_task.abort();
+        translation_task.abort();
+        let _ = audio_task.await;
+        let _ = translation_task.await;
+        tracing::info!("pipeline teardown finished");
     }
 }
 
@@ -514,8 +538,31 @@ fn resample_linear(samples: &[f32], input_rate: u32, output_rate: u32) -> Vec<f3
 }
 
 #[cfg(test)]
+impl PipelineHandle {
+    /// Constructor for tests that does not require real cpal streams. The
+    /// audio/system_audio handles are intentionally `None`.
+    fn for_tests(
+        audio_tx: mpsc::Sender<RawAudioChunk>,
+        audio_task: JoinHandle<()>,
+        translation_task: JoinHandle<()>,
+    ) -> Self {
+        Self {
+            audio_tx,
+            audio_task,
+            translation_task,
+            microphone: None,
+            system_audio: None,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
-    use super::{merge_transcripts, TranscriptAssembler};
+    use std::time::Duration;
+
+    use tokio::sync::mpsc;
+
+    use super::{merge_transcripts, PipelineHandle, RawAudioChunk, TranscriptAssembler};
 
     #[test]
     fn merges_overlapping_transcript_fragments() {
@@ -539,5 +586,43 @@ mod tests {
             assembler.ingest("Try to write at least one comment", 2_000, true),
             Some("Try to write at least one comment".to_string())
         );
+    }
+
+    /// Critical scenario: shutdown must complete in finite time even when both
+    /// tasks are blocked on `await` points (i.e. there is no in-flight blocking
+    /// work). Regression guard for the original "Stop listening hangs forever"
+    /// bug and the quit-time ggml-metal race.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_completes_when_tasks_are_idle() {
+        let (audio_tx, mut audio_rx) = mpsc::channel::<RawAudioChunk>(1);
+        let audio_task = tokio::spawn(async move {
+            // Mirrors the real audio loop: exits when channel closes.
+            while audio_rx.recv().await.is_some() {}
+        });
+        let translation_task = tokio::spawn(async { std::future::pending::<()>().await });
+
+        let handle = PipelineHandle::for_tests(audio_tx, audio_task, translation_task);
+        tokio::time::timeout(Duration::from_secs(2), handle.shutdown())
+            .await
+            .expect("shutdown must complete in finite time");
+    }
+
+    /// Shutdown must not stall when one or both tasks have already finished on
+    /// their own (e.g. translation task exited because the channel closed
+    /// during a clean stop). `JoinHandle::abort` on a finished task is a no-op
+    /// and `.await` resolves immediately — verify the order in `shutdown` does
+    /// not regress this.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_is_idempotent_for_finished_tasks() {
+        let (audio_tx, _audio_rx) = mpsc::channel::<RawAudioChunk>(1);
+        let audio_task = tokio::spawn(async {});
+        let translation_task = tokio::spawn(async {});
+        // Allow both spawns to actually complete before we shut down.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let handle = PipelineHandle::for_tests(audio_tx, audio_task, translation_task);
+        tokio::time::timeout(Duration::from_secs(2), handle.shutdown())
+            .await
+            .expect("shutdown must not stall on already-finished tasks");
     }
 }

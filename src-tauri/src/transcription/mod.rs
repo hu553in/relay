@@ -5,7 +5,8 @@ use anyhow::{anyhow, Context, Result};
 use tracing::info;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::models::{validate_model_file_extension, WHISPER_MODEL_EXTENSIONS};
+use crate::constants::WHISPER_MODEL_EXTENSIONS;
+use crate::models::validate_model_file_extension;
 
 #[derive(Clone)]
 pub(crate) struct WhisperEngine {

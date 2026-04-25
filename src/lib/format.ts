@@ -77,8 +77,6 @@ export function listeningStateLabel(state: ListeningState): string {
       return 'Error';
     case 'starting':
       return 'Starting';
-    case 'stopping':
-      return 'Stopping';
     default:
       return 'Idle';
   }
