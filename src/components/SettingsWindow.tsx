@@ -18,19 +18,19 @@ import {
   FileCode2,
   FileSearchCorner,
   FolderOpen,
-  FolderSearch,
   Info,
   Keyboard,
   Languages,
   Logs,
   Mic,
-  Save,
   SquareTerminal,
 } from 'lucide-react';
 import { type PropsWithChildren, type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 
 import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { type LogEntry, SegmentLogPanel } from '@/components/SegmentLogPanel';
+import { MaxTokensField } from '@/components/settings/MaxTokensField';
+import { PathInputField } from '@/components/settings/PathInputField';
 import { Badge } from '@/components/shared/Badge';
 import { HealthBadge } from '@/components/shared/HealthBadge';
 import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
@@ -152,10 +152,7 @@ const MODEL_STATE_LABELS: Record<ModelState, string> = {
 
 export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const snapshot = relay.snapshot;
-  const [draftState, setDraftState] = useState<RelaySettings | null>(null);
-  const [hasLocalEdits, setHasLocalEdits] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSection>('inputs');
-  const [isSaving, setIsSaving] = useState(false);
   const [version, setVersion] = useState('0.1.0');
   const [configPreview, setConfigPreview] = useState('');
   const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
@@ -196,15 +193,10 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
     };
   }, []);
 
-  const draft = hasLocalEdits ? draftState : (draftState ?? snapshot?.settings ?? null);
-  const isDirty = useMemo(() => {
-    if (!snapshot || !draft) return false;
-    return !settingsEqual(snapshot.settings, draft);
-  }, [draft, snapshot]);
-
+  const settings = snapshot?.settings;
   const allModels = snapshot?.models;
-  const sttSelectedModel = draft?.sttSelectedModel;
-  const translationSelectedModel = draft?.translation.selectedModel;
+  const sttSelectedModel = settings?.sttSelectedModel;
+  const translationSelectedModel = settings?.translation.selectedModel;
   const diagnostics = snapshot?.diagnostics;
 
   const transcriptionModels = useMemo(
@@ -244,7 +236,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
     [diagnostics]
   );
 
-  if (relay.isLoading || !snapshot || !draft) {
+  if (relay.isLoading || !snapshot || !settings) {
     return <WindowShell message={relay.error ?? 'Loading Relay settings...'} />;
   }
 
@@ -268,63 +260,45 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
     }
   };
 
-  const replaceDraft = (next: RelaySettings) => {
-    setHasLocalEdits(true);
-    setDraftState(next);
-  };
-
-  const commitDraft = (next: RelaySettings) => {
-    setDraftState(next);
-    setHasLocalEdits(false);
-  };
-
-  const saveSettings = async (nextSettings?: RelaySettings) => {
-    const settings = nextSettings ?? draft;
-    setIsSaving(true);
+  const applySettings = async (next: RelaySettings) => {
     try {
-      const updated = await updateSettings(settings);
-      commitDraft(updated.settings);
+      await updateSettings(next);
       await refreshConfigPreview();
-      pushToast({ title: 'Relay', message: 'Settings saved', tone: 'success' });
     } catch (reason: unknown) {
       notifyError(reason);
-    } finally {
-      setIsSaving(false);
     }
   };
 
   const pickModelDirectory = async (kind: ModelKind) => {
     const selected = await open({ multiple: false, directory: true });
-    if (!selected) return;
+    if (typeof selected !== 'string') return;
 
     const next =
       kind === 'transcription'
-        ? { ...draft, sttModelPath: selected, sttSelectedModel: '' }
+        ? { ...settings, sttModelPath: selected, sttSelectedModel: '' }
         : {
-            ...draft,
+            ...settings,
             translation: {
-              ...draft.translation,
+              ...settings.translation,
               modelPath: selected,
               selectedModel: '',
             },
           };
-    commitDraft(next);
-    await saveSettings(next);
+    await applySettings(next);
   };
 
   const chooseModel = async (kind: ModelKind, model: ModelRecord) => {
     const next =
       kind === 'transcription'
-        ? { ...draft, sttSelectedModel: model.relativePath }
+        ? { ...settings, sttSelectedModel: model.relativePath }
         : {
-            ...draft,
+            ...settings,
             translation: {
-              ...draft.translation,
+              ...settings.translation,
               selectedModel: model.relativePath,
             },
           };
-    commitDraft(next);
-    await saveSettings(next);
+    await applySettings(next);
   };
 
   const active = SECTION_BY_ID[activeSection];
@@ -360,19 +334,6 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
               <h1 className='text-[17px] font-semibold text-white'>{active.label}</h1>
               <p className='mt-0.5 text-[11.5px] text-stone-400'>{active.description}</p>
             </div>
-
-            <div className='flex items-center gap-2'>
-              {isDirty ? <Badge tone='warning'>Unsaved</Badge> : null}
-              <button
-                type='button'
-                onClick={() => void saveSettings()}
-                disabled={isSaving || !isDirty}
-                className='inline-flex items-center gap-2 rounded-lg bg-stone-100 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-stone-300 disabled:cursor-not-allowed disabled:bg-white/6 disabled:text-stone-500 disabled:opacity-100'
-              >
-                <Save size={14} />
-                {isSaving ? 'Saving...' : 'Save settings'}
-              </button>
-            </div>
           </div>
 
           <div className='mx-auto w-full max-w-230 px-5 py-4'>
@@ -380,16 +341,16 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
               <SectionGrid cols={2}>
                 <InputSourceStatusCard
                   title='Microphone'
-                  source={{ ...snapshot.microphone, enabled: draft.microphoneEnabled }}
+                  source={snapshot.microphone}
                   onToggle={enabled => {
-                    replaceDraft({ ...draft, microphoneEnabled: enabled });
+                    void applySettings({ ...settings, microphoneEnabled: enabled });
                   }}
                 />
                 <InputSourceStatusCard
                   title='System audio'
-                  source={{ ...snapshot.systemAudio, enabled: draft.systemAudioEnabled }}
+                  source={snapshot.systemAudio}
                   onToggle={enabled => {
-                    replaceDraft({ ...draft, systemAudioEnabled: enabled });
+                    void applySettings({ ...settings, systemAudioEnabled: enabled });
                   }}
                 />
               </SectionGrid>
@@ -405,16 +366,15 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   <HealthMessage health={snapshot.sttHealth} detail={snapshot.sttDetail} />
                   <Field
                     label='Whisper models directory'
-                    hint='App scans this folder and all subfolders for .bin files.'
+                    hint='App scans this folder and all subfolders for .bin files. Press Enter or click away to save manual edits.'
                   >
-                    <PathField
-                      value={draft.sttModelPath}
-                      onChange={value => {
-                        replaceDraft({ ...draft, sttModelPath: value });
-                      }}
-                      onPick={() => void pickModelDirectory('transcription')}
+                    <PathInputField
+                      value={settings.sttModelPath}
                       placeholder='/Users/you/models/whisper'
-                      buttonLabel='Browse'
+                      onCommit={value => {
+                        void applySettings({ ...settings, sttModelPath: value });
+                      }}
+                      onBrowse={() => void pickModelDirectory('transcription')}
                     />
                   </Field>
                   <Field label='Found models'>
@@ -453,30 +413,29 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   />
                   <Field label='Target language' hint='Language used for translated output.'>
                     <LanguageCombobox
-                      value={draft.translation.targetLanguage}
+                      value={settings.translation.targetLanguage}
                       onChange={next => {
-                        replaceDraft({
-                          ...draft,
-                          translation: { ...draft.translation, targetLanguage: next },
+                        void applySettings({
+                          ...settings,
+                          translation: { ...settings.translation, targetLanguage: next },
                         });
                       }}
                     />
                   </Field>
                   <Field
                     label='Translation models directory'
-                    hint='App scans this folder and all subfolders for .gguf files.'
+                    hint='App scans this folder and all subfolders for .gguf files. Press Enter or click away to save manual edits.'
                   >
-                    <PathField
-                      value={draft.translation.modelPath}
-                      onChange={value => {
-                        replaceDraft({
-                          ...draft,
-                          translation: { ...draft.translation, modelPath: value },
+                    <PathInputField
+                      value={settings.translation.modelPath}
+                      placeholder='/Users/you/models/translation'
+                      onCommit={value => {
+                        void applySettings({
+                          ...settings,
+                          translation: { ...settings.translation, modelPath: value },
                         });
                       }}
-                      onPick={() => void pickModelDirectory('translation')}
-                      placeholder='/Users/you/models/translation'
-                      buttonLabel='Browse'
+                      onBrowse={() => void pickModelDirectory('translation')}
                     />
                   </Field>
                   <Field label='Found models'>
@@ -486,18 +445,12 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     label='Max tokens'
                     hint='Max generated translation tokens per segment. Lower is faster. Higher helps longer sentences.'
                   >
-                    <Input
-                      type='number'
-                      value={String(draft.translation.maxTokens)}
-                      onChange={value => {
-                        const parsed = Math.floor(Number(value));
-                        const safe = Number.isFinite(parsed) && parsed > 0 ? parsed : 96;
-                        replaceDraft({
-                          ...draft,
-                          translation: {
-                            ...draft.translation,
-                            maxTokens: safe,
-                          },
+                    <MaxTokensField
+                      value={settings.translation.maxTokens}
+                      onCommit={next => {
+                        void applySettings({
+                          ...settings,
+                          translation: { ...settings.translation, maxTokens: next },
                         });
                       }}
                     />
@@ -526,8 +479,14 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   title='Global shortcuts'
                   description='Edit shortcuts only in the config file. App validates them on app startup and falls back to defaults if needed.'
                 >
-                  <ShortcutRow label='Toggle listening' value={draft.shortcuts.toggleListening} />
-                  <ShortcutRow label='Show / hide overlay' value={draft.shortcuts.toggleOverlay} />
+                  <ShortcutRow
+                    label='Toggle listening'
+                    value={settings.shortcuts.toggleListening}
+                  />
+                  <ShortcutRow
+                    label='Show / hide overlay'
+                    value={settings.shortcuts.toggleOverlay}
+                  />
                   {snapshot.shortcutWarnings.length > 0 ? (
                     <div className='grid gap-2'>
                       {snapshot.shortcutWarnings.map(warning => (
@@ -549,11 +508,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                 <ToggleRow
                   label='Always on top'
                   detail='Keep the overlay above other windows while it is visible.'
-                  checked={draft.overlay.alwaysOnTop}
+                  checked={settings.overlay.alwaysOnTop}
                   onChange={checked => {
-                    replaceDraft({
-                      ...draft,
-                      overlay: { ...draft.overlay, alwaysOnTop: checked },
+                    void applySettings({
+                      ...settings,
+                      overlay: { ...settings.overlay, alwaysOnTop: checked },
                     });
                   }}
                 />
@@ -645,23 +604,6 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   );
 }
 
-function settingsEqual(left: RelaySettings, right: RelaySettings): boolean {
-  return (
-    left.microphoneEnabled === right.microphoneEnabled &&
-    left.systemAudioEnabled === right.systemAudioEnabled &&
-    left.sttModelPath === right.sttModelPath &&
-    left.sttSelectedModel === right.sttSelectedModel &&
-    left.translation.modelPath === right.translation.modelPath &&
-    left.translation.selectedModel === right.translation.selectedModel &&
-    left.translation.targetLanguage === right.translation.targetLanguage &&
-    left.translation.maxTokens === right.translation.maxTokens &&
-    left.overlay.visible === right.overlay.visible &&
-    left.overlay.alwaysOnTop === right.overlay.alwaysOnTop &&
-    left.shortcuts.toggleListening === right.shortcuts.toggleListening &&
-    left.shortcuts.toggleOverlay === right.shortcuts.toggleOverlay
-  );
-}
-
 function NavButton({
   label,
   icon,
@@ -733,30 +675,6 @@ function Field({ label, hint, children }: PropsWithChildren<{ label: string; hin
       </div>
       {children}
     </div>
-  );
-}
-
-function Input({
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  type?: 'text' | 'number';
-}) {
-  return (
-    <input
-      className='w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-[12px] text-white outline-none transition placeholder:text-stone-500 focus:border-stone-300/45'
-      value={value}
-      type={type}
-      onChange={event => {
-        onChange(event.currentTarget.value);
-      }}
-      placeholder={placeholder}
-    />
   );
 }
 
@@ -849,27 +767,6 @@ function LanguageCombobox({
         </ComboboxOptions>
       </div>
     </Combobox>
-  );
-}
-
-function PathField({
-  value,
-  onChange,
-  onPick,
-  placeholder,
-  buttonLabel,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  onPick: () => void;
-  placeholder: string;
-  buttonLabel: string;
-}) {
-  return (
-    <div className='flex gap-2'>
-      <Input value={value} onChange={onChange} placeholder={placeholder} />
-      <IconButton label={buttonLabel} onClick={onPick} icon={<FolderSearch size={16} />} />
-    </div>
   );
 }
 
