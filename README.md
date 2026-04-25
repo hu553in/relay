@@ -61,7 +61,7 @@ settings, logs, and toast states.
 
 - macOS for the current primary development target.
 - Node.js 25 and `pnpm` 10, matching the CI setup.
-- Rust stable with `rustfmt` and `clippy`.
+- Rust stable with `rustfmt`, `clippy` and `cargo-llvm-cov`.
 - Tauri 2 system dependencies for the target platform.
 - Local model files:
   - Whisper GGML `.bin` model for transcription.
@@ -195,7 +195,7 @@ pnpm tauri build
 - `src-tauri/src/translation`: llama.cpp translation provider and health checks.
 - `src-tauri/src/settings`: TOML persistence and config path handling.
 - `src-tauri/src/commands`: Tauri command boundary.
-- `src-tauri/src/platform`: platform-specific support checks.
+- `src-tauri/src/platform`: platform-specific code.
 - `src`: React + TypeScript frontend.
 - `src/components`: main window, overlay, settings, shared UI, logs, and toast components.
 - `src/hooks`: Tauri event subscriptions, live-log scroll behavior, and toast state.
