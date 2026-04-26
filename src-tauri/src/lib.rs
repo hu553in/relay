@@ -3,6 +3,7 @@ mod audio;
 mod commands;
 mod constants;
 mod domain;
+mod ggml;
 mod ids;
 mod models;
 mod pipeline;
@@ -148,12 +149,29 @@ fn run_inner() -> Result<()> {
 
 fn spawn_graceful_shutdown(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        // Latch the ggml-shutdown flag *before* we do anything else, so any
+        // start_listening / restart_listening / refresh_runtime_healths racing
+        // us is rejected at the entry point rather than enqueuing fresh
+        // ggml backend work that would race the upcoming `app.exit(0)`.
+        ggml::begin_shutdown();
+
         if let Some(relay) = app.try_state::<RelayApp>() {
             let relay = relay.inner().clone();
             if let Err(error) = relay.shutdown().await {
                 tracing::warn!("shutdown failed: {error:#}");
             }
         }
+
+        // Belt-and-suspenders drain: `relay.shutdown` only awaits the *current*
+        // PipelineHandle. Fire-and-forget paths (`PipelineHandle::stop` from a
+        // prior `stop_listening`, the stale-handle branch of
+        // `spawn_start_pipeline`, an in-flight `provider.check()` model load
+        // that hasn't been wired into a handle yet) are not visible to it.
+        // Every ggml backend call is wrapped in a `GgmlGuard`, so this drain
+        // returns only after every such call has finished — no matter which
+        // task spawned it.
+        ggml::drain().await;
+
         // Order matters: flip to DONE before `app.exit(0)` so the ExitRequested
         // we trigger ourselves observes DONE and lets Tauri actually exit.
         SHUTDOWN_STATE.store(SHUTDOWN_DONE, Ordering::Release);
@@ -265,7 +283,7 @@ mod tests {
         assert_eq!(decide_exit(&state), ExitDecision::BeginShutdown);
         // While the spawned graceful shutdown is still running, another Cmd+Q
         // (or signal) must NOT be allowed to slip through to Tauri's default
-        // exit path — that would tear down ggml-metal mid-flight again.
+        // exit path — that would tear down the ggml backend mid-flight again.
         assert_eq!(decide_exit(&state), ExitDecision::PreventExit);
         assert_eq!(decide_exit(&state), ExitDecision::PreventExit);
         assert_eq!(state.load(Ordering::Acquire), SHUTDOWN_IN_PROGRESS);

@@ -37,10 +37,23 @@ impl PipelineHandle {
         tauri::async_runtime::spawn(self.shutdown());
     }
 
-    /// Awaitable teardown. Drops cpal streams on the blocking pool, then awaits the
-    /// async tasks so any in-flight `spawn_blocking` (Whisper transcribe) actually
-    /// finishes before this returns. Required before `app.exit` to avoid racing
-    /// ggml-metal teardown against pending Metal init dispatch blocks.
+    /// Awaitable teardown. Drops cpal streams on the blocking pool, then drains
+    /// the async tasks *naturally* (no abort) so any in-flight `spawn_blocking`
+    /// — Whisper transcribe or llama.cpp translate — actually finishes before
+    /// this returns. Required before `app.exit` to avoid racing ggml backend
+    /// teardown against an in-flight ggml compute graph.
+    ///
+    /// Why not `JoinHandle::abort`: abort cancels the *outer* future at its
+    /// next `.await`, but the blocking thread spawned by `tokio::task::spawn_blocking`
+    /// is uncancellable. After abort, `audio_task.await` resolves immediately
+    /// while the whisper worker keeps running on a tokio blocking thread. If
+    /// `app.exit(0)` then triggers libc cleanup, the C++ static destructors
+    /// free the ggml backend's global device state out from under that
+    /// still-running worker → device-state-after-free crash in
+    /// `whisper_full_with_state` (observed as SIGBUS on macOS Metal; equivalent
+    /// crashes are possible on CUDA / Vulkan backends). Closing the channel
+    /// instead lets each loop finish its current blocking step, observe the
+    /// channel close, and return cleanly.
     pub(crate) async fn shutdown(self) {
         tracing::info!("pipeline teardown started");
         let PipelineHandle {
@@ -51,6 +64,8 @@ impl PipelineHandle {
             system_audio,
         } = self;
 
+        // cpal Stream::drop is blocking on macOS — keep it off the runtime.
+        // Dropping `audio_tx` here is also what signals the audio loop to exit.
         let _ = tauri::async_runtime::spawn_blocking(move || {
             drop(microphone);
             drop(system_audio);
@@ -58,8 +73,10 @@ impl PipelineHandle {
         })
         .await;
 
-        audio_task.abort();
-        translation_task.abort();
+        // Audio task drops its translation_tx clone when it returns, which
+        // cascades the close into translation_task. Order matters: await
+        // audio_task first so translation_tx is released, then await
+        // translation_task.
         let _ = audio_task.await;
         let _ = translation_task.await;
         tracing::info!("pipeline teardown finished");
@@ -588,18 +605,21 @@ mod tests {
         );
     }
 
-    /// Critical scenario: shutdown must complete in finite time even when both
-    /// tasks are blocked on `await` points (i.e. there is no in-flight blocking
-    /// work). Regression guard for the original "Stop listening hangs forever"
-    /// bug and the quit-time ggml-metal race.
+    /// Critical scenario: shutdown must complete when both tasks are idle on
+    /// their `recv().await` points (no in-flight blocking work). Tasks must
+    /// observe channel close and return cleanly — without the abort path that
+    /// would otherwise have masked any close-cascade bug.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_completes_when_tasks_are_idle() {
         let (audio_tx, mut audio_rx) = mpsc::channel::<RawAudioChunk>(1);
+        let (translation_tx, mut translation_rx) = mpsc::channel::<()>(1);
         let audio_task = tokio::spawn(async move {
-            // Mirrors the real audio loop: exits when channel closes.
+            // Mirrors the real audio loop: holds translation_tx, exits on close.
             while audio_rx.recv().await.is_some() {}
+            drop(translation_tx);
         });
-        let translation_task = tokio::spawn(async { std::future::pending::<()>().await });
+        let translation_task =
+            tokio::spawn(async move { while translation_rx.recv().await.is_some() {} });
 
         let handle = PipelineHandle::for_tests(audio_tx, audio_task, translation_task);
         tokio::time::timeout(Duration::from_secs(2), handle.shutdown())
@@ -609,9 +629,8 @@ mod tests {
 
     /// Shutdown must not stall when one or both tasks have already finished on
     /// their own (e.g. translation task exited because the channel closed
-    /// during a clean stop). `JoinHandle::abort` on a finished task is a no-op
-    /// and `.await` resolves immediately — verify the order in `shutdown` does
-    /// not regress this.
+    /// during a clean stop). `.await` on a finished JoinHandle resolves
+    /// immediately — verify the order in `shutdown` does not regress this.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn shutdown_is_idempotent_for_finished_tasks() {
         let (audio_tx, _audio_rx) = mpsc::channel::<RawAudioChunk>(1);
@@ -624,5 +643,62 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(2), handle.shutdown())
             .await
             .expect("shutdown must not stall on already-finished tasks");
+    }
+
+    /// Regression guard for the macOS SIGBUS at exit (and analogous
+    /// device-state-after-free crashes on other ggml backends): shutdown
+    /// MUST wait for an in-flight `spawn_blocking` (simulating whisper
+    /// transcribe) to return before resolving. If shutdown returned early
+    /// — as it would with `JoinHandle::abort` — `app.exit(0)` would race
+    /// ggml backend teardown against the still-running worker thread.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn shutdown_waits_for_in_flight_blocking_work() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let (audio_tx, mut audio_rx) = mpsc::channel::<RawAudioChunk>(1);
+        let (translation_tx, mut translation_rx) = mpsc::channel::<()>(1);
+        let blocking_done = Arc::new(AtomicBool::new(false));
+        let blocking_done_inner = Arc::clone(&blocking_done);
+
+        let audio_task = tokio::spawn(async move {
+            // Drain at least once so we observe the close, but with an
+            // in-flight blocking call that must complete before we exit.
+            let _ = audio_rx.recv().await;
+            let flag = Arc::clone(&blocking_done_inner);
+            let _ = tokio::task::spawn_blocking(move || {
+                std::thread::sleep(Duration::from_millis(400));
+                flag.store(true, Ordering::Release);
+            })
+            .await;
+            // After blocking work finishes, drain the (now closed) channel.
+            while audio_rx.recv().await.is_some() {}
+            drop(translation_tx);
+        });
+        let translation_task =
+            tokio::spawn(async move { while translation_rx.recv().await.is_some() {} });
+
+        // Push one chunk so the audio task enters the blocking phase before
+        // shutdown closes the sender.
+        audio_tx
+            .send(RawAudioChunk {
+                source: crate::domain::InputSource::Microphone,
+                captured_at_ms: 0,
+                sample_rate: 16_000,
+                samples: Vec::new(),
+            })
+            .await
+            .expect("seed audio task with one chunk");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let handle = PipelineHandle::for_tests(audio_tx, audio_task, translation_task);
+        tokio::time::timeout(Duration::from_secs(2), handle.shutdown())
+            .await
+            .expect("shutdown must complete");
+        assert!(
+            blocking_done.load(Ordering::Acquire),
+            "shutdown returned before in-flight spawn_blocking finished — \
+             this regresses the macOS exit-time SIGBUS fix"
+        );
     }
 }

@@ -6,6 +6,7 @@ use tracing::info;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::constants::WHISPER_MODEL_EXTENSIONS;
+use crate::ggml;
 use crate::models::validate_model_file_extension;
 
 #[derive(Clone)]
@@ -31,6 +32,12 @@ impl WhisperEngine {
     }
 
     pub(crate) fn ensure_ready(&self) -> Result<()> {
+        // Loading a Whisper context allocates ggml backend state — gate it
+        // through the ggml guard so a quit racing this load makes the drain
+        // wait.
+        let Some(_guard) = ggml::try_enter() else {
+            return Err(anyhow!("Whisper is shutting down; skipping model load"));
+        };
         self.ensure_context().map(|_| ())
     }
 
@@ -38,6 +45,15 @@ impl WhisperEngine {
         if pcm.is_empty() {
             return Ok(String::new());
         }
+
+        // Hold the ggml guard for the entire scope: model load (in
+        // ensure_context_locked) AND `state.full` decode both touch the
+        // ggml backend device. Drop happens on return — natural OR error path.
+        let Some(_guard) = ggml::try_enter() else {
+            return Err(anyhow!(
+                "Whisper is shutting down; skipping in-flight transcribe"
+            ));
+        };
 
         let mut guard = self
             .context

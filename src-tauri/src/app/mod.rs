@@ -116,6 +116,15 @@ impl RelayApp {
     }
 
     pub(crate) fn update_settings(&self, settings: RelaySettings) -> Result<AppSnapshot> {
+        // During graceful shutdown the snapshot is about to be discarded
+        // anyway and `refresh_runtime_healths` would touch the ggml backend
+        // through `check_blocking`. Reject without writing to disk —
+        // settings are persisted on every prior change, so the user does
+        // not lose anything by ignoring this last in-flight request.
+        if crate::ggml::is_shutting_down() {
+            return self.snapshot_result();
+        }
+
         let mut settings = settings;
         settings.normalize_model_locations();
         let shortcut_warnings = normalize_shortcuts(&mut settings.shortcuts);
@@ -156,6 +165,14 @@ impl RelayApp {
     }
 
     pub(crate) fn start_listening(&self) -> Result<()> {
+        // Shutdown is one-way: refuse to spawn fresh ggml backend work that
+        // the global drainer would have to chase. Returning Ok keeps the
+        // Tauri command surface uniform — the user-visible behavior is
+        // simply "nothing happens" while the app is dying.
+        if crate::ggml::is_shutting_down() {
+            return Ok(());
+        }
+
         enum StartBlocker {
             NoInput,
             SttUnavailable,
@@ -251,8 +268,8 @@ impl RelayApp {
 
     /// Synchronous shutdown for the quit path: returns only after pipeline teardown
     /// (including in-flight Whisper transcribe spawn_blocking) actually finishes.
-    /// This is what prevents `app.exit(0)` from running ggml-metal static destructors
-    /// while Metal init dispatch blocks are still in flight.
+    /// This is what prevents `app.exit(0)` from running ggml backend static destructors
+    /// while backend init dispatch blocks are still in flight.
     pub(crate) async fn shutdown(&self) -> Result<()> {
         tracing::info!("shutdown requested");
         let pipeline = {
@@ -628,6 +645,12 @@ impl RelayApp {
     }
 
     fn restart_listening(&self, reason: &str) -> Result<()> {
+        if crate::ggml::is_shutting_down() {
+            // Mirror `start_listening`: a restart triggered by an in-flight
+            // settings change must not race the graceful exit.
+            return Ok(());
+        }
+
         let session_id = Uuid::new_v4();
         let pipeline = {
             let mut guard = self.lock_state()?;
@@ -651,6 +674,14 @@ impl RelayApp {
     fn spawn_start_pipeline(&self, session_id: Uuid) {
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
+            // Defensive: callers gate on `ggml::is_shutting_down` before
+            // reaching this method, but the spawn here means the check and
+            // the actual pipeline start happen on different ticks. Re-check
+            // inside the spawned task to refuse cleanly even if shutdown
+            // landed between the gate and us.
+            if crate::ggml::is_shutting_down() {
+                return;
+            }
             match start_pipeline(Arc::new(this.clone()), session_id).await {
                 Ok(handle) => {
                     let stale_handle = if let Ok(mut guard) = this.lock_state() {

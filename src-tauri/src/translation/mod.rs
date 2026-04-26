@@ -17,6 +17,7 @@ use crate::constants::{
     MAX_GENERATION_TOKENS, MIN_GENERATION_TOKENS, TRANSLATION_MODEL_EXTENSIONS,
 };
 use crate::domain::{ServiceHealth, TranslationSettings};
+use crate::ggml;
 use crate::models::validate_model_file_extension;
 
 #[derive(Debug, Clone)]
@@ -75,10 +76,20 @@ fn translate_blocking(
     // Empty input means upstream produced no transcript to translate; do not
     // pay the cost of locking the runtime, decoding a prompt, or waking the
     // model. Returning an empty string keeps the contract of "translation of
-    // nothing is nothing" without surfacing a misleading error.
+    // nothing is nothing" without surfacing a misleading error. This check
+    // happens before the ggml guard because empty input does not touch the
+    // ggml backend at all.
     if request.text.trim().is_empty() {
         return Ok(String::new());
     }
+
+    // Hold the ggml guard for the entire scope: model load (inside
+    // ensure_loaded) and decode both touch the ggml backend device.
+    let Some(_guard) = ggml::try_enter() else {
+        return Err(anyhow!(
+            "Translation is shutting down; skipping in-flight translate"
+        ));
+    };
 
     let runtime_lock = runtime_state()
         .lock()
@@ -113,6 +124,17 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
             detail: "Translation model directory must point to a folder".to_string(),
         };
     }
+
+    // Refuse to touch the ggml backend if a graceful shutdown is in
+    // progress. Without this, a settings refresh racing Cmd+Q would call
+    // `ensure_loaded` (which initializes LlamaBackend → ggml backend) on a
+    // tokio worker thread that the drainer cannot see.
+    let Some(_ggml_guard) = ggml::try_enter() else {
+        return TranslationHealthReport {
+            health: ServiceHealth::Unavailable,
+            detail: "Translation runtime is shutting down".to_string(),
+        };
+    };
 
     let runtime_lock = match runtime_state().try_lock() {
         Ok(lock) => lock,
@@ -347,8 +369,19 @@ mod tests {
     use crate::constants::DEFAULT_TARGET_LANGUAGE;
     use crate::domain::{ServiceHealth, TranslationSettings};
 
+    /// Acquire the cross-module ggml test lock and reset the shutdown flag
+    /// so this test does not race ggml-module tests that flip the flag.
+    fn acquire_ggml_lock() -> std::sync::MutexGuard<'static, ()> {
+        let guard = crate::ggml::test_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        crate::ggml::reset_for_tests();
+        guard
+    }
+
     #[test]
     fn health_check_degrades_when_runtime_is_busy() {
+        let _ggml_guard = acquire_ggml_lock();
         let root = std::env::temp_dir().join(format!("relay-translation-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).expect("create temp translation dir");
         let _runtime_guard = runtime_state().lock().expect("lock translation runtime");
@@ -372,6 +405,7 @@ mod tests {
     /// a misleading "model not selected" error to the user.
     #[test]
     fn empty_input_short_circuits_without_loading_runtime() {
+        let _ggml_guard = acquire_ggml_lock();
         let request = TranslationRequest {
             text: "   \n\t".to_string(),
             target_language: DEFAULT_TARGET_LANGUAGE.to_string(),
@@ -382,5 +416,38 @@ mod tests {
 
         let result = translate_blocking(settings, request).expect("empty input is Ok");
         assert!(result.is_empty());
+    }
+
+    /// Once the ggml shutdown latch is set, both translate and check must
+    /// refuse to touch the runtime. This is the contract that
+    /// `spawn_graceful_shutdown` relies on to prevent races between
+    /// in-flight settings refreshes / translations and `app.exit(0)`.
+    #[test]
+    fn translate_and_check_refuse_after_ggml_shutdown() {
+        let _ggml_guard = acquire_ggml_lock();
+        crate::ggml::begin_shutdown();
+        let root = std::env::temp_dir().join(format!("relay-translation-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temp translation dir");
+        let settings = TranslationSettings {
+            model_path: root.to_string_lossy().to_string(),
+            selected_model: "missing.gguf".to_string(),
+            ..TranslationSettings::default()
+        };
+
+        let report = check_settings_blocking(&settings);
+        assert_eq!(report.health, ServiceHealth::Unavailable);
+        assert!(report.detail.to_lowercase().contains("shutting down"));
+
+        let result = translate_blocking(
+            settings,
+            TranslationRequest {
+                text: "hello".to_string(),
+                target_language: DEFAULT_TARGET_LANGUAGE.to_string(),
+            },
+        );
+        let error = result.expect_err("translate must fail during shutdown");
+        assert!(error.to_string().to_lowercase().contains("shutting down"));
+
+        fs::remove_dir_all(root).ok();
     }
 }
