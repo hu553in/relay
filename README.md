@@ -2,7 +2,7 @@
 
 > Hear. Relay. Understand.
 
-[![CI](https://github.com/hu553in/relay-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in/relay-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/hu553in/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in/relay/actions/workflows/ci.yml)
 
 Relay is a desktop utility for live speech transcription and local translation. It listens to microphone
 audio, system audio, or both, turns speech into transcript segments with Whisper, translates those segments
