@@ -1,7 +1,7 @@
 [package]
 name = "relay"
 version = "0.1.0"
-description = "Hear. Relay. Understand."
+description = "Desktop utility for live speech transcription and local translation."
 authors = ["ruslan.khasanshin"]
 edition = "2021"
 

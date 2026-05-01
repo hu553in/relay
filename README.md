@@ -5,38 +5,30 @@
 [![CI](https://github.com/hu553in/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in/relay/actions/workflows/ci.yml)
 
 Relay is a desktop utility for live speech transcription and local translation. It listens to microphone
-audio, system audio, or both, turns speech into transcript segments with Whisper, translates those segments
-with a local llama.cpp-compatible model, and presents the results in a compact main window and a lightweight
-overlay.
+audio, system audio, or both, transcribes speech with Whisper, translates segments with a local
+llama.cpp-compatible model, and shows the result in a main window and overlay.
 
-Relay is currently developed and tested primarily on macOS, but the codebase is structured as a Tauri 2
+Relay is developed and tested primarily on macOS, but the codebase is structured as a Tauri 2
 desktop app with platform-specific pieces isolated where practical.
 
-## Current status
+## Features
 
-This repository is the active Rust + Tauri 2 implementation of Relay. It replaces the earlier Swift
-prototype and should not be treated as a direct port.
+- Menu-bar desktop app with controls, settings, overlay, tray menu, and global shortcuts
+- Microphone capture through `cpal`
+- System audio capture where the platform and runtime support it
+- Local speech-to-text with `whisper-rs` and Whisper GGML `.bin` models
+- Local translation with `llama-cpp-2` and llama.cpp-compatible GGUF chat or instruct models
+- Recursive model discovery from configured model directories
+- Transcript and translation logs with copy, clear, auto-scroll, and overlay support
+- TOML settings in the user config directory
+- Diagnostics UI and persisted diagnostics logs
 
-What works today:
+## Limitations
 
-- Menu-bar style desktop app with main controls, settings, overlay, tray menu, and global shortcuts.
-- Microphone capture through `cpal`.
-- System audio capture through the current default output-device path where the platform and runtime
-  support it.
-- Local speech-to-text with `whisper-rs` and Whisper GGML `.bin` models.
-- Local translation with `llama-cpp-2` and llama.cpp-compatible GGUF chat or instruct models.
-- Recursive model discovery from configured model directories.
-- Live transcript and translation log panels with copy, clear, auto-scroll, and overlay support.
-- TOML settings stored under the user config directory.
-- Diagnostics UI and persisted diagnostics logs.
-
-Important limitations:
-
-- The MVP is focused on macOS development and testing first.
 - System audio support is runtime- and device-dependent and degrades gracefully when unavailable.
 - Translation quality and availability depend on the selected GGUF model exposing a usable chat template.
-- There is no hosted translation provider in this MVP.
-- This app is not yet signed or notarized for production distribution.
+- There is no hosted translation provider.
+- Release builds are not signed or notarized.
 
 ## How it works
 
@@ -61,7 +53,7 @@ settings, logs, and toast states.
 
 - macOS for the current primary development target.
 - Node.js 25 and `pnpm` 10, matching the CI setup.
-- Rust stable with `rustfmt`, `clippy` and `cargo-llvm-cov`.
+- Rust stable with `rustfmt`, `clippy`, and `cargo-llvm-cov`.
 - Tauri 2 system dependencies for the target platform.
 - Local model files:
   - Whisper GGML `.bin` model for transcription.
@@ -125,11 +117,11 @@ microphone = true
 system_audio = false
 
 [transcription]
-models_dir = "/Users/you/Models/whisper"
+models_dir = "/Users/example/Models/whisper"
 model_file = "ggml-small.bin"
 
 [translation]
-models_dir = "/Users/you/Models/translation"
+models_dir = "/Users/example/Models/translation"
 model_file = "Qwen2.5-3B-Instruct-Q5_K_M.gguf"
 target_language = "en"
 max_tokens = 96
@@ -148,39 +140,14 @@ persisted TOML. Shortcut changes are loaded on app startup.
 
 ## Development
 
-Install dependencies:
+Useful commands:
 
-```sh
+```bash
 pnpm install
-```
-
-Run the app in development mode:
-
-```sh
 pnpm tauri dev
-```
-
-Run checks:
-
-```sh
 pnpm check
-```
-
-Run checks and auto-fixes:
-
-```sh
 pnpm check:fix
-```
-
-Build frontend assets:
-
-```sh
 pnpm build
-```
-
-Build the Tauri app:
-
-```sh
 pnpm tauri build
 ```
 
@@ -203,7 +170,7 @@ pnpm tauri build
 
 ## UI overview
 
-Relay has three main windows and surfaces:
+Relay has three main windows:
 
 - Main window: live workspace. The default mode shows input toggles and transcript and translation logs.
   Stats mode replaces the live workspace with session, system, and model health stats.
@@ -266,7 +233,7 @@ Open Settings -> Logs. Use the reveal action to show `diagnostics.log` in Finder
 
 Versioning is handled through `release-it`:
 
-```sh
+```bash
 pnpm release:patch
 pnpm release:minor
 pnpm release:major
