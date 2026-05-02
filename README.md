@@ -26,6 +26,8 @@ desktop app with platform-specific pieces isolated where practical.
 ## Limitations
 
 - System audio support is runtime- and device-dependent and degrades gracefully when unavailable.
+  - macOS and Windows use the default output-device loopback path exposed through `cpal`.
+  - Linux uses PipeWire first through `pw-record`, then falls back to the PulseAudio default monitor through `parec`.
 - Translation quality and availability depend on the selected GGUF model exposing a usable chat template.
 - There is no hosted translation provider.
 - Release builds are not signed or notarized.
@@ -55,6 +57,9 @@ settings, logs, and toast states.
 - Node.js 25 and `pnpm` 10, matching the CI setup.
 - Rust stable with `rustfmt`, `clippy`, and `cargo-llvm-cov`.
 - Tauri 2 system dependencies for the target platform.
+- Optional Linux system-audio runtime tools:
+  - `pw-record` for PipeWire desktops.
+  - `parec` for older PulseAudio desktops or Pulse-compatible setups.
 - Local model files:
   - Whisper GGML `.bin` model for transcription.
   - llama.cpp-compatible `.gguf` model for translation.
@@ -147,15 +152,21 @@ pnpm install
 pnpm tauri dev
 pnpm check
 pnpm check:fix
+pnpm test:rust
 pnpm build
 pnpm tauri build
 ```
+
+`pnpm check` runs static checks only: frontend lint/typecheck plus Rust fmt/check/clippy. Rust tests are
+separate so local checks and CI can report static failures independently from backend runtime tests.
+GitHub Actions runs Rust tests in a matrix across Ubuntu 22.04, Ubuntu 24.04, macOS, and Windows.
 
 ## Project structure
 
 - `src-tauri/src/app`: application state, lifecycle, windows, diagnostics, model discovery, and runtime
   health.
 - `src-tauri/src/audio`: microphone and system-audio capture abstractions and raw audio chunks.
+  System-audio backends live under `src-tauri/src/audio/system`.
 - `src-tauri/src/pipeline`: listening pipeline orchestration, chunking, transcription, and translation
   flow.
 - `src-tauri/src/transcription`: `whisper-rs` model loading and transcription.
@@ -224,6 +235,10 @@ Check macOS microphone permissions and confirm a default input device exists.
 
 System audio capture depends on the current platform, runtime, and device path. Relay should continue in
 microphone-only mode when system audio is unavailable.
+
+On Linux, make sure `pw-record` or `parec` is installed and executable in `PATH`; on Debian/Ubuntu,
+those tools are provided by `pipewire-bin` and `pulseaudio-utils`. On Windows or macOS, make sure a
+default output device is present and the OS/runtime exposes loopback capture for it.
 
 ### Logs do not appear
 

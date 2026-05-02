@@ -34,6 +34,7 @@ export function InputSourceStatusCard({
   const showLevel = source.enabled && source.available;
   const showError =
     source.enabled && (source.health === 'degraded' || source.health === 'unavailable');
+  const switchDisabled = !source.enabled && !source.available;
 
   return (
     <article className='rounded-xl border border-white/6 bg-[rgba(24,24,22,0.58)] px-3.5 py-3'>
@@ -41,7 +42,7 @@ export function InputSourceStatusCard({
         <p className='text-[13px] font-medium text-white'>{title}</p>
         <div className='flex items-center gap-2'>
           <StatusBadge value={status} tone={statusTone} />
-          <Switch checked={source.enabled} disabled={!source.available} onChange={onToggle} />
+          <Switch checked={source.enabled} disabled={switchDisabled} onChange={onToggle} />
         </div>
       </div>
 

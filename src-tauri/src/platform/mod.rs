@@ -6,20 +6,7 @@ mod macos;
 use anyhow::Result;
 use tauri::{AppHandle, WebviewWindow, WebviewWindowBuilder};
 
-use crate::domain::SourceCapability;
-
 type WindowBuilder<'a> = WebviewWindowBuilder<'a, tauri::Wry, AppHandle>;
-
-pub(crate) fn system_audio_capability() -> SourceCapability {
-    #[cfg(target_os = "macos")]
-    {
-        macos::system_audio_capability()
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        default::system_audio_capability()
-    }
-}
 
 pub(crate) fn configure_app_policy(app: &mut tauri::App) {
     #[cfg(target_os = "macos")]

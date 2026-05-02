@@ -7,6 +7,10 @@ use tokio::sync::mpsc;
 
 use crate::domain::{InputSource, SourceCapability};
 
+mod system;
+
+pub(crate) use system::SystemAudioInputHandle;
+
 #[derive(Debug, Clone)]
 pub(crate) struct RawAudioChunk {
     pub(crate) source: InputSource,
@@ -16,10 +20,6 @@ pub(crate) struct RawAudioChunk {
 }
 
 pub(crate) struct MicrophoneInputHandle {
-    _stream: Stream,
-}
-
-pub(crate) struct SystemAudioInputHandle {
     _stream: Stream,
 }
 
@@ -55,27 +55,11 @@ pub(crate) fn microphone_capability() -> SourceCapability {
     }
 }
 
-impl SystemAudioInputHandle {
-    pub(crate) fn start(
-        tx: mpsc::Sender<RawAudioChunk>,
-        on_error: Arc<dyn Fn(InputSource, String) + Send + Sync>,
-    ) -> Result<Self> {
-        let host = cpal::default_host();
-        let device = host.default_output_device().ok_or_else(|| {
-            anyhow!("No default output device is available for system audio loopback")
-        })?;
-        let config = device
-            .default_output_config()
-            .context("read default system output config")?;
-        let stream = build_stream(InputSource::SystemAudio, device, config, tx, on_error)?;
-        stream
-            .play()
-            .context("start system audio loopback stream")?;
-        Ok(Self { _stream: stream })
-    }
+pub(crate) fn system_audio_capability() -> SourceCapability {
+    system::capability()
 }
 
-fn build_stream(
+pub(super) fn build_stream(
     source: InputSource,
     device: Device,
     config: SupportedStreamConfig,
@@ -151,7 +135,11 @@ fn build_stream(
 ///   * The trailing partial frame from `data.chunks(channels)` is averaged
 ///     by its actual length, not `channels`, so a truncated tail does not
 ///     bias toward zero.
-fn fold_to_mono<T: Copy>(data: &[T], channels: usize, convert: impl Fn(T) -> f32) -> Vec<f32> {
+pub(super) fn fold_to_mono<T: Copy>(
+    data: &[T],
+    channels: usize,
+    convert: impl Fn(T) -> f32,
+) -> Vec<f32> {
     if channels == 0 {
         return Vec::new();
     }

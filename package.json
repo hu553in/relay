@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "check": "lefthook run check --all-files --force",
     "check:fix": "lefthook run check-fix --all-files --force",
+    "test:rust": "lefthook run rust-test --all-files --force",
     "prepare": "command -v lefthook && lefthook install || true",
     "release:patch": "release-it patch",
     "release:minor": "release-it minor",

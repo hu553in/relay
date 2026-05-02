@@ -942,7 +942,7 @@ fn apply_input_capabilities(snapshot: &mut AppSnapshot) {
     );
     apply_source_capability(
         &mut snapshot.system_audio,
-        crate::platform::system_audio_capability(),
+        crate::audio::system_audio_capability(),
     );
 }
 

@@ -8,7 +8,7 @@ export function translationText(segment: Pick<SegmentRecord, 'translation' | 'st
   if (segment.status === 'translationFailed') {
     return 'Translation failed';
   }
-  if (segment.status === 'translated') {
+  if (segment.status === 'translated' || segment.status === 'transcribed') {
     return 'Translation unavailable';
   }
   return 'Waiting for translation';

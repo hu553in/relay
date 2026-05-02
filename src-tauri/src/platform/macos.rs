@@ -1,21 +1,9 @@
 use anyhow::Result;
-use cpal::traits::HostTrait;
 use tauri::{ActivationPolicy, AppHandle, Manager, WebviewWindow, WebviewWindowBuilder};
 
-use crate::domain::SourceCapability;
 use crate::windowing;
 
 type WindowBuilder<'a> = WebviewWindowBuilder<'a, tauri::Wry, AppHandle>;
-
-pub(crate) fn system_audio_capability() -> SourceCapability {
-    if cpal::default_host().default_output_device().is_some() {
-        SourceCapability::available("Ready to capture the default output device loopback")
-    } else {
-        SourceCapability::unavailable(
-            "System audio capture needs a default output device with loopback support",
-        )
-    }
-}
 
 pub(crate) fn configure_app_policy(app: &mut tauri::App) {
     app.set_activation_policy(ActivationPolicy::Accessory);

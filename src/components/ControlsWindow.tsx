@@ -3,6 +3,7 @@ import {
   Captions,
   CaptionsOff,
   HeartPulse,
+  House,
   Languages,
   Play,
   Settings,
@@ -102,7 +103,10 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
   const state = snapshot.listeningState;
   const isListening = state === 'listening';
   const isBusy = state === 'starting';
-  const canStartListening = snapshot.sttHealth === 'ready';
+  const hasAvailableInput =
+    (snapshot.microphone.enabled && snapshot.microphone.available) ||
+    (snapshot.systemAudio.enabled && snapshot.systemAudio.available);
+  const canStartListening = snapshot.sttHealth === 'ready' && hasAvailableInput;
 
   async function run(action: () => Promise<unknown>) {
     try {
@@ -138,7 +142,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                   onClick={() => {
                     setShowStats(value => !value);
                   }}
-                  icon={<HeartPulse size={15} />}
+                  icon={showStats ? <House size={15} /> : <HeartPulse size={15} />}
                 />
                 <IconButton
                   label='Open settings'

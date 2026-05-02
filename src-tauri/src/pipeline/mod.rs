@@ -309,11 +309,7 @@ pub(crate) async fn start_pipeline(
         match SystemAudioInputHandle::start(audio_tx.clone(), on_error.clone()) {
             Ok(handle) => {
                 ensure_session_current(&app, session_id, "after system audio startup")?;
-                let _ = app.set_source_runtime(
-                    InputSource::SystemAudio,
-                    true,
-                    "Active on the default output device loopback",
-                );
+                let _ = app.set_source_runtime(InputSource::SystemAudio, true, handle.detail());
                 let _ = app.push_diagnostic("info", "Audio: system output loopback started");
                 Some(handle)
             }

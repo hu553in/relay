@@ -1,12 +1,6 @@
 use anyhow::Result;
 use tauri::{AppHandle, WebviewWindow, WebviewWindowBuilder};
 
-use crate::domain::SourceCapability;
-
-pub(crate) fn system_audio_capability() -> SourceCapability {
-    SourceCapability::unavailable("System audio capture is not implemented on this platform")
-}
-
 pub(crate) fn configure_app_policy(_app: &mut tauri::App) {}
 
 pub(crate) fn apply_main_window_platform_behavior<'a>(
