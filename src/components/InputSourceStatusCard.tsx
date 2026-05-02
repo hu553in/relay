@@ -22,7 +22,8 @@ export function InputSourceStatusCard({
   onToggle: (enabled: boolean) => void;
 }) {
   const status = sourceStatus(source);
-  const barPercent = source.enabled && source.available ? (source.inputLevel ?? 0) : 0;
+  const showLevel = source.enabled && source.available && source.capturing;
+  const barPercent = showLevel ? (source.inputLevel ?? 0) : 0;
   const barClass =
     barPercent >= 75 ? 'bg-rose-500' : barPercent >= 45 ? 'bg-orange-400' : 'bg-stone-300';
   const statusTone =
@@ -31,7 +32,6 @@ export function InputSourceStatusCard({
       : status === 'disabled'
         ? 'neutral'
         : 'danger';
-  const showLevel = source.enabled && source.available;
   const showError =
     source.enabled && (source.health === 'degraded' || source.health === 'unavailable');
   const switchDisabled = !source.enabled && !source.available;

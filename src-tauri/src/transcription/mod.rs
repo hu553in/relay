@@ -5,20 +5,22 @@ use anyhow::{anyhow, Context, Result};
 use tracing::info;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::constants::WHISPER_MODEL_EXTENSIONS;
+use crate::constants::{MAX_WORKER_THREADS, MIN_WORKER_THREADS, WHISPER_MODEL_EXTENSIONS};
 use crate::ggml;
 use crate::models::validate_model_file_extension;
 
 #[derive(Clone)]
 pub(crate) struct WhisperEngine {
     model_path: String,
+    threads: u32,
     context: Arc<Mutex<Option<WhisperContext>>>,
 }
 
 impl WhisperEngine {
-    pub(crate) fn new(model_path: impl Into<String>) -> Self {
+    pub(crate) fn new(model_path: impl Into<String>, threads: u32) -> Self {
         Self {
             model_path: model_path.into(),
+            threads: threads.clamp(MIN_WORKER_THREADS, MAX_WORKER_THREADS),
             context: Arc::new(Mutex::new(None)),
         }
     }
@@ -66,7 +68,7 @@ impl WhisperEngine {
             .ok_or_else(|| anyhow!("whisper context was not initialized"))?;
         let mut state = context.create_state()?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_n_threads(4);
+        params.set_n_threads(self.threads as i32);
         params.set_translate(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);

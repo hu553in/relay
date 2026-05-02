@@ -77,7 +77,11 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
                 pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
               }}
               actions={
-                <ClearLogButton label='Clear transcript log' onClick={() => void clearSegments()} />
+                <ClearLogButton
+                  label='Clear transcript log'
+                  disabled={originalEntries.length === 0}
+                  onClick={() => void clearSegments()}
+                />
               }
               footer={
                 <div className='flex w-full items-center justify-between gap-3'>
@@ -98,6 +102,7 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
               actions={
                 <ClearLogButton
                   label='Clear translation log'
+                  disabled={translationEntries.length === 0}
                   onClick={() => void clearTranslationLog()}
                 />
               }

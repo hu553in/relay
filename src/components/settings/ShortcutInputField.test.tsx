@@ -43,4 +43,23 @@ describe('ShortcutInputField', () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith('CmdOrCtrl+Shift+K');
   });
+
+  it('commits unchanged valid text on blur so shortcut warnings can clear', async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(
+      <ShortcutInputField
+        label='Toggle listening shortcut'
+        value='CmdOrCtrl+Shift+L'
+        onCommit={onCommit}
+      />
+    );
+
+    const input = screen.getByLabelText('Toggle listening shortcut');
+    await user.click(input);
+    await user.tab();
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith('CmdOrCtrl+Shift+L');
+  });
 });

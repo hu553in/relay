@@ -8,17 +8,19 @@ use uuid::Uuid;
 
 use crate::app::RelayApp;
 use crate::audio::{MicrophoneInputHandle, RawAudioChunk, SystemAudioInputHandle};
-use crate::domain::{InputSource, SegmentRecord, SegmentStatus, ServiceHealth};
+use crate::constants::{
+    MAX_TRANSCRIPTION_HOP_SECONDS, MAX_TRANSCRIPTION_SENTENCE_TIMEOUT_MS,
+    MAX_TRANSCRIPTION_WINDOW_SECONDS, MIN_TRANSCRIPTION_HOP_SECONDS,
+    MIN_TRANSCRIPTION_SENTENCE_TIMEOUT_MS, MIN_TRANSCRIPTION_WINDOW_SECONDS,
+};
+use crate::domain::{InputSource, RelaySettings, SegmentRecord, SegmentStatus, ServiceHealth};
 use crate::transcription::WhisperEngine;
 use crate::translation::{build_provider, TranslationRequest};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
-const WINDOW_SECONDS: usize = 4;
-const HOP_SECONDS: usize = 2;
 const SILENCE_RMS_THRESHOLD: f32 = 0.008;
 const MIN_SENTENCE_WORDS_ON_SILENCE: usize = 4;
 const MIN_SENTENCE_WORDS_ON_TIMEOUT: usize = 6;
-const MAX_PENDING_SENTENCE_MS: u64 = 9_000;
 const AUDIO_QUEUE_CAPACITY: usize = 24;
 const TRANSLATION_QUEUE_CAPACITY: usize = 64;
 
@@ -104,6 +106,7 @@ pub(crate) async fn start_pipeline(
             .selected_stt_model_path()
             .map(|path| path.to_string_lossy().to_string())
             .unwrap_or_default(),
+        settings.stt_threads,
     );
     let provider = build_provider(&settings.translation);
     let provider = Arc::from(provider);
@@ -142,16 +145,17 @@ pub(crate) async fn start_pipeline(
     let processor_app = Arc::clone(&app);
     let translation_app = Arc::clone(&app);
     let translation_target = settings.translation.target_language.clone();
+    let timing = TranscriptionTiming::from_settings(&settings);
 
     let audio_session_id = session_id;
     let audio_task = tokio::spawn(async move {
         let mut chunkers = HashMap::from([
-            (InputSource::Microphone, StreamingChunker::new()),
-            (InputSource::SystemAudio, StreamingChunker::new()),
+            (InputSource::Microphone, StreamingChunker::new(timing)),
+            (InputSource::SystemAudio, StreamingChunker::new(timing)),
         ]);
         let mut assemblers = HashMap::from([
-            (InputSource::Microphone, TranscriptAssembler::default()),
-            (InputSource::SystemAudio, TranscriptAssembler::default()),
+            (InputSource::Microphone, TranscriptAssembler::new(timing)),
+            (InputSource::SystemAudio, TranscriptAssembler::new(timing)),
         ]);
 
         while let Some(chunk) = audio_rx.recv().await {
@@ -368,8 +372,45 @@ fn normalize_level(rms: f32) -> f32 {
     (rms * 8.0).clamp(0.0, 1.0)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TranscriptionTiming {
+    window_seconds: u32,
+    hop_seconds: u32,
+    sentence_timeout_ms: u32,
+}
+
+impl TranscriptionTiming {
+    fn from_settings(settings: &RelaySettings) -> Self {
+        let window_seconds = settings.stt_window_seconds.clamp(
+            MIN_TRANSCRIPTION_WINDOW_SECONDS,
+            MAX_TRANSCRIPTION_WINDOW_SECONDS,
+        );
+        let hop_seconds = settings
+            .stt_hop_seconds
+            .clamp(MIN_TRANSCRIPTION_HOP_SECONDS, MAX_TRANSCRIPTION_HOP_SECONDS)
+            .min(window_seconds);
+        let sentence_timeout_ms = settings.stt_sentence_timeout_ms.clamp(
+            MIN_TRANSCRIPTION_SENTENCE_TIMEOUT_MS,
+            MAX_TRANSCRIPTION_SENTENCE_TIMEOUT_MS,
+        );
+
+        Self {
+            window_seconds,
+            hop_seconds,
+            sentence_timeout_ms,
+        }
+    }
+}
+
+impl Default for TranscriptionTiming {
+    fn default() -> Self {
+        Self::from_settings(&RelaySettings::default())
+    }
+}
+
 struct StreamingChunker {
     buffer: Vec<f32>,
+    timing: TranscriptionTiming,
 }
 
 struct WindowFrame {
@@ -379,8 +420,11 @@ struct WindowFrame {
 }
 
 impl StreamingChunker {
-    fn new() -> Self {
-        Self { buffer: Vec::new() }
+    fn new(timing: TranscriptionTiming) -> Self {
+        Self {
+            buffer: Vec::new(),
+            timing,
+        }
     }
 
     fn push(
@@ -389,8 +433,8 @@ impl StreamingChunker {
         captured_at_ms: u64,
         samples: Vec<f32>,
     ) -> Vec<WindowFrame> {
-        let window_size = TARGET_SAMPLE_RATE as usize * WINDOW_SECONDS;
-        let hop_size = TARGET_SAMPLE_RATE as usize * HOP_SECONDS;
+        let window_size = TARGET_SAMPLE_RATE as usize * self.timing.window_seconds as usize;
+        let hop_size = TARGET_SAMPLE_RATE as usize * self.timing.hop_seconds as usize;
 
         self.buffer
             .extend(resample_linear(&samples, input_rate, TARGET_SAMPLE_RATE));
@@ -410,14 +454,23 @@ impl StreamingChunker {
     }
 }
 
-#[derive(Default)]
 struct TranscriptAssembler {
     pending: String,
     last_emitted: String,
     started_at_ms: Option<u64>,
+    timing: TranscriptionTiming,
 }
 
 impl TranscriptAssembler {
+    fn new(timing: TranscriptionTiming) -> Self {
+        Self {
+            pending: String::new(),
+            last_emitted: String::new(),
+            started_at_ms: None,
+            timing,
+        }
+    }
+
     fn ingest(&mut self, fragment: &str, captured_at_ms: u64, low_energy: bool) -> Option<String> {
         if self.pending.is_empty() {
             self.pending = fragment.to_string();
@@ -435,7 +488,8 @@ impl TranscriptAssembler {
         let should_flush = has_terminal_punctuation(pending)
             || (low_energy && word_count >= MIN_SENTENCE_WORDS_ON_SILENCE)
             || (self.started_at_ms.is_some_and(|started_at_ms| {
-                captured_at_ms.saturating_sub(started_at_ms) >= MAX_PENDING_SENTENCE_MS
+                captured_at_ms.saturating_sub(started_at_ms)
+                    >= u64::from(self.timing.sentence_timeout_ms)
             }) && word_count >= MIN_SENTENCE_WORDS_ON_TIMEOUT);
 
         if !should_flush {
@@ -452,6 +506,12 @@ impl TranscriptAssembler {
 
         self.last_emitted = finalized.clone();
         Some(finalized)
+    }
+}
+
+impl Default for TranscriptAssembler {
+    fn default() -> Self {
+        Self::new(TranscriptionTiming::default())
     }
 }
 
@@ -575,7 +635,11 @@ mod tests {
 
     use tokio::sync::mpsc;
 
-    use super::{merge_transcripts, PipelineHandle, RawAudioChunk, TranscriptAssembler};
+    use super::{
+        merge_transcripts, PipelineHandle, RawAudioChunk, StreamingChunker, TranscriptAssembler,
+        TranscriptionTiming, TARGET_SAMPLE_RATE,
+    };
+    use crate::domain::RelaySettings;
 
     #[test]
     fn merges_overlapping_transcript_fragments() {
@@ -599,6 +663,38 @@ mod tests {
             assembler.ingest("Try to write at least one comment", 2_000, true),
             Some("Try to write at least one comment".to_string())
         );
+    }
+
+    #[test]
+    fn timing_settings_clamp_hop_to_window_and_sentence_timeout_bounds() {
+        let settings = RelaySettings {
+            stt_window_seconds: 2,
+            stt_hop_seconds: 12,
+            stt_sentence_timeout_ms: 1,
+            ..RelaySettings::default()
+        };
+
+        let timing = TranscriptionTiming::from_settings(&settings);
+
+        assert_eq!(timing.window_seconds, 2);
+        assert_eq!(timing.hop_seconds, 2);
+        assert_eq!(timing.sentence_timeout_ms, 2_000);
+    }
+
+    #[test]
+    fn chunker_uses_configured_window_and_hop() {
+        let timing = TranscriptionTiming {
+            window_seconds: 2,
+            hop_seconds: 1,
+            sentence_timeout_ms: 9_000,
+        };
+        let mut chunker = StreamingChunker::new(timing);
+        let samples = vec![0.0; TARGET_SAMPLE_RATE as usize * 3];
+
+        let windows = chunker.push(TARGET_SAMPLE_RATE, 1_000, samples);
+
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].samples.len(), TARGET_SAMPLE_RATE as usize * 2);
     }
 
     /// Critical scenario: shutdown must complete when both tasks are idle on

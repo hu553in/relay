@@ -5,7 +5,10 @@ use uuid::Uuid;
 
 use crate::constants::{
     DEFAULT_MAX_TOKENS, DEFAULT_TARGET_LANGUAGE, DEFAULT_TOGGLE_LISTENING_SHORTCUT,
-    DEFAULT_TOGGLE_OVERLAY_SHORTCUT,
+    DEFAULT_TOGGLE_OVERLAY_SHORTCUT, DEFAULT_TRANSCRIPTION_HOP_SECONDS,
+    DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS, DEFAULT_TRANSCRIPTION_THREADS,
+    DEFAULT_TRANSCRIPTION_WINDOW_SECONDS, DEFAULT_TRANSLATION_CONTEXT_TOKENS,
+    DEFAULT_TRANSLATION_THREADS,
 };
 
 const DEFAULT_TRANSLATION_MODEL_PATH: &str = "";
@@ -113,6 +116,10 @@ pub struct TranslationSettings {
     pub selected_model: String,
     pub target_language: String,
     pub max_tokens: u32,
+    #[serde(default = "default_translation_context_tokens")]
+    pub context_tokens: u32,
+    #[serde(default = "default_translation_threads")]
+    pub threads: u32,
 }
 
 impl Default for TranslationSettings {
@@ -122,6 +129,8 @@ impl Default for TranslationSettings {
             selected_model: String::new(),
             target_language: DEFAULT_TARGET_LANGUAGE.to_string(),
             max_tokens: DEFAULT_MAX_TOKENS,
+            context_tokens: DEFAULT_TRANSLATION_CONTEXT_TOKENS,
+            threads: DEFAULT_TRANSLATION_THREADS,
         }
     }
 }
@@ -177,6 +186,14 @@ pub struct RelaySettings {
     pub stt_model_path: String,
     #[serde(default)]
     pub stt_selected_model: String,
+    #[serde(default = "default_transcription_threads")]
+    pub stt_threads: u32,
+    #[serde(default = "default_transcription_window_seconds")]
+    pub stt_window_seconds: u32,
+    #[serde(default = "default_transcription_hop_seconds")]
+    pub stt_hop_seconds: u32,
+    #[serde(default = "default_transcription_sentence_timeout_ms")]
+    pub stt_sentence_timeout_ms: u32,
     pub translation: TranslationSettings,
     pub overlay: OverlaySettings,
     #[serde(default)]
@@ -190,6 +207,10 @@ impl Default for RelaySettings {
             system_audio_enabled: false,
             stt_model_path: String::new(),
             stt_selected_model: String::new(),
+            stt_threads: DEFAULT_TRANSCRIPTION_THREADS,
+            stt_window_seconds: DEFAULT_TRANSCRIPTION_WINDOW_SECONDS,
+            stt_hop_seconds: DEFAULT_TRANSCRIPTION_HOP_SECONDS,
+            stt_sentence_timeout_ms: DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS,
             translation: TranslationSettings::default(),
             overlay: OverlaySettings::default(),
             shortcuts: ShortcutSettings::default(),
@@ -206,6 +227,30 @@ impl RelaySettings {
         normalize_model_location(&mut self.stt_model_path, &mut self.stt_selected_model);
         self.translation.normalize_model_location();
     }
+}
+
+const fn default_translation_context_tokens() -> u32 {
+    DEFAULT_TRANSLATION_CONTEXT_TOKENS
+}
+
+const fn default_translation_threads() -> u32 {
+    DEFAULT_TRANSLATION_THREADS
+}
+
+const fn default_transcription_threads() -> u32 {
+    DEFAULT_TRANSCRIPTION_THREADS
+}
+
+const fn default_transcription_window_seconds() -> u32 {
+    DEFAULT_TRANSCRIPTION_WINDOW_SECONDS
+}
+
+const fn default_transcription_hop_seconds() -> u32 {
+    DEFAULT_TRANSCRIPTION_HOP_SECONDS
+}
+
+const fn default_transcription_sentence_timeout_ms() -> u32 {
+    DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -355,7 +355,9 @@ impl RelayApp {
 
     pub(crate) fn toggle_controls_visibility(&self) -> Result<()> {
         let window = self.window(crate::windowing::MAIN.label, "main")?;
-        if window.is_visible()? {
+        let visible = window.is_visible()?;
+        let focused = window.is_focused().unwrap_or(false);
+        if should_hide_controls_on_tray_click(visible, focused) {
             window.hide()?;
         } else {
             window.show()?;
@@ -835,7 +837,10 @@ impl RelayApp {
         } else {
             match snapshot.settings.selected_stt_model_path() {
                 Some(path) => {
-                    let engine = WhisperEngine::new(path.to_string_lossy().to_string());
+                    let engine = WhisperEngine::new(
+                        path.to_string_lossy().to_string(),
+                        snapshot.settings.stt_threads,
+                    );
                     match engine.ensure_ready() {
                         Ok(()) => {
                             self.update_stt_health(
@@ -1086,9 +1091,13 @@ fn clear_selected_models_after_directory_change(
     }
 }
 
+fn should_hide_controls_on_tray_click(visible: bool, focused: bool) -> bool {
+    visible && focused
+}
+
 #[cfg(test)]
 mod tests {
-    use super::clear_selected_models_after_directory_change;
+    use super::{clear_selected_models_after_directory_change, should_hide_controls_on_tray_click};
     use crate::domain::{RelaySettings, TranslationSettings};
 
     #[test]
@@ -1127,5 +1136,12 @@ mod tests {
         clear_selected_models_after_directory_change(&previous, &mut next);
 
         assert_eq!(next.stt_selected_model, "new.bin");
+    }
+
+    #[test]
+    fn tray_click_hides_controls_only_when_window_is_visible_and_focused() {
+        assert!(should_hide_controls_on_tray_click(true, true));
+        assert!(!should_hide_controls_on_tray_click(true, false));
+        assert!(!should_hide_controls_on_tray_click(false, false));
     }
 }

@@ -70,4 +70,29 @@ describe('InputSourceStatusCard', () => {
 
     expect(onToggle).not.toHaveBeenCalled();
   });
+
+  it('hides level meter while the source is enabled but not capturing', () => {
+    render(
+      <InputSourceStatusCard
+        title='Microphone'
+        source={source({ capturing: false, inputLevel: 80 })}
+        onToggle={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('Input level')).toBeNull();
+  });
+
+  it('shows level meter while the source is actively capturing', () => {
+    render(
+      <InputSourceStatusCard
+        title='Microphone'
+        source={source({ capturing: true, inputLevel: 80 })}
+        onToggle={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Input level')).toBeTruthy();
+    expect(screen.getByText('80%')).toBeTruthy();
+  });
 });

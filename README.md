@@ -134,12 +134,18 @@ system_audio = false
 [transcription]
 models_dir = "/Users/Application Support/Relay/models"
 model_file = "ggml-small.bin"
+threads = 4
+window_seconds = 4
+hop_seconds = 2
+sentence_timeout_ms = 9000
 
 [translation]
 models_dir = "/Users/Application Support/Relay/models"
 model_file = "Qwen2.5-3B-Instruct-Q5_K_M.gguf"
 target_language = "en"
 max_tokens = 96
+context_tokens = 2048
+threads = 8
 
 [overlay]
 visible = true
@@ -154,6 +160,24 @@ Settings can be edited through the Settings window. The Raw config tab shows a r
 persisted TOML. Shortcut text fields validate on save and active global shortcuts are re-registered after
 settings are saved.
 
+Model matching is case-insensitive for recommended and selected model names, so a file already present
+with different casing is treated as the same model instead of creating duplicate recommended rows.
+Recommended downloads are saved using Relay's configured `relative_path`, not by guessing from the URL.
+
+Transcription tuning:
+
+- `threads`: CPU threads used by Whisper.
+- `window_seconds`: seconds of audio per Whisper decode. Lower reduces latency; higher gives more context.
+- `hop_seconds`: seconds between overlapping decodes. Lower updates more often and costs more CPU.
+- `sentence_timeout_ms`: max time to hold a partial sentence before emitting it.
+
+Translation tuning:
+
+- `target_language`: ISO code like `de` / `ja`, or a plain custom language name.
+- `max_tokens`: max generated tokens per translated segment.
+- `context_tokens`: llama.cpp context window. Higher fits longer prompts and outputs but uses more memory.
+- `threads`: CPU threads used by llama.cpp translation.
+
 ## Development
 
 Useful commands:
@@ -163,7 +187,7 @@ pnpm install
 pnpm tauri dev
 pnpm check
 pnpm check:fix
-pnpm test:rust
+pnpm test:backend
 pnpm build
 pnpm tauri build
 ```

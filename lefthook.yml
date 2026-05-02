@@ -38,6 +38,11 @@ pre-commit:
         cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
         --all-targets --all-features -- -D warnings
 
+    - name: cargo-test
+      run: >-
+        cargo llvm-cov --manifest-path src-tauri/Cargo.toml --workspace
+        --all-features --no-cfg-coverage --html
+
 check:
   jobs:
     - name: eslint
@@ -49,7 +54,7 @@ check:
     - name: typecheck
       run: pnpm exec tsc --noEmit
 
-    - name: frontend-test
+    - name: test-frontend
       run: pnpm test:frontend
 
     - name: cargo-fmt
@@ -67,6 +72,11 @@ check:
         cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
         --all-targets --all-features -- -D warnings
 
+    - name: cargo-test
+      run: >-
+        cargo llvm-cov --manifest-path src-tauri/Cargo.toml --workspace
+        --all-features --no-cfg-coverage --html
+
 check-fix:
   jobs:
     - name: prettier
@@ -81,7 +91,7 @@ check-fix:
     - name: typecheck
       run: pnpm exec tsc --noEmit
 
-    - name: frontend-test
+    - name: test-frontend
       run: pnpm test:frontend
 
     - name: cargo-fmt
@@ -99,7 +109,12 @@ check-fix:
         cargo clippy --manifest-path src-tauri/Cargo.toml --workspace
         --all-targets --all-features -- -D warnings
 
-rust-test:
+    - name: cargo-test
+      run: >-
+        cargo llvm-cov --manifest-path src-tauri/Cargo.toml --workspace
+        --all-features --no-cfg-coverage --html
+
+test-backend:
   jobs:
     - name: cargo-test
       run: >-

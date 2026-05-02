@@ -5,6 +5,7 @@ interface CommittableDraftOptions<TValue> {
   toDraft: (value: TValue) => string;
   fromDraft: (text: string) => TValue;
   commit: (next: TValue) => void;
+  commitUnchangedOnBlur?: boolean;
 }
 
 interface CommittableDraft {
@@ -24,6 +25,7 @@ export function useCommittableDraft<TValue>({
   toDraft,
   fromDraft,
   commit,
+  commitUnchangedOnBlur = false,
 }: CommittableDraftOptions<TValue>): CommittableDraft {
   const [draft, setDraft] = useState(() => toDraft(value));
   const [focused, setFocused] = useState(false);
@@ -55,7 +57,7 @@ export function useCommittableDraft<TValue>({
     const parsed = fromDraft(draft);
     const normalized = toDraft(parsed);
     if (normalized !== draft) setDraft(normalized);
-    if (parsed !== value) commit(parsed);
+    if (parsed !== value || commitUnchangedOnBlur) commit(parsed);
   };
 
   return {

@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  ExternalLink,
   FileCode2,
   FileSearchCorner,
   FolderOpen,
@@ -30,7 +31,7 @@ import { type PropsWithChildren, type ReactNode, useEffect, useId, useMemo, useS
 
 import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { type LogEntry, SegmentLogPanel } from '@/components/SegmentLogPanel';
-import { MaxTokensField } from '@/components/settings/MaxTokensField';
+import { IntegerSettingField, MaxTokensField } from '@/components/settings/MaxTokensField';
 import { PathInputField } from '@/components/settings/PathInputField';
 import { ShortcutInputField } from '@/components/settings/ShortcutInputField';
 import { Badge } from '@/components/shared/Badge';
@@ -444,13 +445,69 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       downloading={downloadingModelKind !== null}
                     />
                   </Field>
+                  <Field
+                    label='Whisper CPU threads'
+                    hint={`Threads used by Whisper (${String(constants.minWorkerThreads)} to ${String(constants.maxWorkerThreads)}). Higher can transcribe faster until CPU contention or heat dominates.`}
+                  >
+                    <IntegerSettingField
+                      value={settings.sttThreads}
+                      min={constants.minWorkerThreads}
+                      max={constants.maxWorkerThreads}
+                      fallback={constants.defaultTranscriptionThreads}
+                      onCommit={next => {
+                        void applySettings({ ...settings, sttThreads: next });
+                      }}
+                    />
+                  </Field>
+                  <Field
+                    label='Audio window'
+                    hint={`Seconds per Whisper decode (${String(constants.minTranscriptionWindowSeconds)} to ${String(constants.maxTranscriptionWindowSeconds)}). Lower reduces latency; higher gives more speech context.`}
+                  >
+                    <IntegerSettingField
+                      value={settings.sttWindowSeconds}
+                      min={constants.minTranscriptionWindowSeconds}
+                      max={constants.maxTranscriptionWindowSeconds}
+                      fallback={constants.defaultTranscriptionWindowSeconds}
+                      onCommit={next => {
+                        void applySettings({ ...settings, sttWindowSeconds: next });
+                      }}
+                    />
+                  </Field>
+                  <Field
+                    label='Audio hop'
+                    hint={`Seconds between overlapping decodes (${String(constants.minTranscriptionHopSeconds)} to ${String(constants.maxTranscriptionHopSeconds)}). Lower updates more often and costs more CPU.`}
+                  >
+                    <IntegerSettingField
+                      value={settings.sttHopSeconds}
+                      min={constants.minTranscriptionHopSeconds}
+                      max={constants.maxTranscriptionHopSeconds}
+                      fallback={constants.defaultTranscriptionHopSeconds}
+                      onCommit={next => {
+                        void applySettings({ ...settings, sttHopSeconds: next });
+                      }}
+                    />
+                  </Field>
+                  <Field
+                    label='Sentence timeout'
+                    hint={`Milliseconds before a partial sentence is emitted (${String(constants.minTranscriptionSentenceTimeoutMs)} to ${String(constants.maxTranscriptionSentenceTimeoutMs)}). Lower feels faster; higher waits for cleaner sentence boundaries.`}
+                  >
+                    <IntegerSettingField
+                      value={settings.sttSentenceTimeoutMs}
+                      min={constants.minTranscriptionSentenceTimeoutMs}
+                      max={constants.maxTranscriptionSentenceTimeoutMs}
+                      fallback={constants.defaultTranscriptionSentenceTimeoutMs}
+                      onCommit={next => {
+                        void applySettings({ ...settings, sttSentenceTimeoutMs: next });
+                      }}
+                    />
+                  </Field>
                   <InlineNote>
                     Whisper GGML *.{constants.whisperModelExtensions.join(', *.')} models are
                     supported here. Multilingual models cover many languages. English-only variants
                     (with &quot;en&quot; in name) are faster, but they will not handle mixed or
                     non-English speech.
                   </InlineNote>
-                  <ActionRow
+                  <BrowseLinkRow
                     label='Browse Whisper transcription models on Hugging Face'
                     onClick={() => {
                       void openUrl('https://huggingface.co/ggerganov/whisper.cpp/tree/main');
@@ -472,7 +529,10 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     health={snapshot.translationHealth}
                     detail={snapshot.translationDetail}
                   />
-                  <Field label='Target language' hint='Language used for translated output.'>
+                  <Field
+                    label='Target language'
+                    hint='Use an ISO code like de or ja, or type a custom language name such as Brazilian Portuguese.'
+                  >
                     <LanguageCombobox
                       value={settings.translation.targetLanguage}
                       onChange={next => {
@@ -529,12 +589,47 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       }}
                     />
                   </Field>
+                  <Field
+                    label='Context tokens'
+                    hint={`llama.cpp context window (${String(constants.minTranslationContextTokens)} to ${String(constants.maxTranslationContextTokens)}). Higher fits longer prompts and outputs but uses more memory.`}
+                  >
+                    <IntegerSettingField
+                      value={settings.translation.contextTokens}
+                      min={constants.minTranslationContextTokens}
+                      max={constants.maxTranslationContextTokens}
+                      fallback={constants.defaultTranslationContextTokens}
+                      onCommit={next => {
+                        void applySettings({
+                          ...settings,
+                          translation: { ...settings.translation, contextTokens: next },
+                        });
+                      }}
+                    />
+                  </Field>
+                  <Field
+                    label='llama.cpp CPU threads'
+                    hint={`Threads used by translation (${String(constants.minWorkerThreads)} to ${String(constants.maxWorkerThreads)}). Higher can be faster until CPU contention or heat dominates.`}
+                  >
+                    <IntegerSettingField
+                      value={settings.translation.threads}
+                      min={constants.minWorkerThreads}
+                      max={constants.maxWorkerThreads}
+                      fallback={constants.defaultTranslationThreads}
+                      onCommit={next => {
+                        void applySettings({
+                          ...settings,
+                          translation: { ...settings.translation, threads: next },
+                        });
+                      }}
+                    />
+                  </Field>
                   <InlineNote>
                     Use llama.cpp-compatible instruct or chat GGUF models. The Hugging Face filter
                     below is a good starting point, but every result still needs a chat template and
-                    practical translation quality.
+                    practical translation quality. Sampling is greedy in the current runtime, so
+                    there is no temperature setting to tune.
                   </InlineNote>
-                  <ActionRow
+                  <BrowseLinkRow
                     label='Browse translation model candidates on Hugging Face'
                     onClick={() => {
                       void openUrl(
@@ -551,7 +646,22 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
               <SectionGrid>
                 <SectionCard
                   title='Global shortcuts'
-                  description='Edit shortcut text, then press Enter or click away to save.'
+                  description={
+                    <>
+                      Edit shortcut text, then press Enter or click away to save. Use modifiers and
+                      keys joined with &quot;+&quot;, for example CmdOrCtrl+Shift+L.{' '}
+                      <button
+                        type='button'
+                        className='text-stone-200 underline decoration-white/20 underline-offset-3 transition hover:text-white hover:decoration-white/45'
+                        onClick={() => {
+                          void openUrl('https://tauri.app/reference/javascript/global-shortcut/');
+                        }}
+                      >
+                        Tauri shortcut syntax
+                      </button>
+                      .
+                    </>
+                  }
                 >
                   <ShortcutRow
                     label='Toggle listening'
@@ -628,6 +738,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                         />
                         <ClearLogButton
                           label='Clear diagnostics log'
+                          disabled={diagnosticsEntries.length === 0}
                           onClick={() => {
                             void clearDiagnostics()
                               .then(() => {
@@ -677,8 +788,22 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
 
             {activeSection === 'about' ? (
               <SectionGrid>
-                <MetricRow label='Version' value={version} />
-                <MetricRow label='Developer' value='r.m.khasanshin@gmail.com' />
+                <LabeledInfoRow label='Version' value={version} />
+                <LabeledInfoRow
+                  label='Developer'
+                  value='Ruslan Khasanshin <r.m.khasanshin@gmail.com>'
+                  onClick={() => {
+                    void openUrl('mailto:r.m.khasanshin@gmail.com');
+                  }}
+                />
+                <LabeledInfoRow
+                  label='Website'
+                  value='hu553in.su'
+                  onClick={() => {
+                    void openUrl('https://hu553in.su');
+                  }}
+                  icon={<ExternalLink size={14} />}
+                />
               </SectionGrid>
             ) : null}
           </div>
@@ -730,7 +855,7 @@ function SectionCard({
   description,
   action,
   children,
-}: PropsWithChildren<{ title: string; description?: string; action?: ReactNode }>) {
+}: PropsWithChildren<{ title: string; description?: ReactNode; action?: ReactNode }>) {
   return (
     <section className='rounded-xl border border-white/6 bg-(--relay-card-bg) p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)]'>
       <div className='mb-2.5 flex items-start justify-between gap-3'>
@@ -776,20 +901,19 @@ function LanguageCombobox({
   const trimmedQuery = query.trim();
   const needle = trimmedQuery.toLowerCase();
 
-  const filtered = useMemo(() => {
-    if (!needle) return COMMON_LANGUAGES;
-    return COMMON_LANGUAGES.filter(code => {
-      const name = LANGUAGE_NAMES[code] ?? code;
-      return code.includes(needle) || name.toLowerCase().includes(needle);
-    });
-  }, [needle]);
+  const filtered = !needle
+    ? COMMON_LANGUAGES
+    : COMMON_LANGUAGES.filter(code => {
+        const name = LANGUAGE_NAMES[code] ?? code;
+        return code.includes(needle) || name.toLowerCase().includes(needle);
+      });
 
   const showCreate = trimmedQuery.length > 0 && !COMMON_LANGUAGES.includes(needle);
 
   const displayValue = (code: string) => {
     if (!code) return '';
     const name = LANGUAGE_NAMES[code];
-    return name ? `${code.toUpperCase()} · ${name}` : code.toUpperCase();
+    return name ? `${code.toUpperCase()} · ${name}` : code;
   };
 
   return (
@@ -839,14 +963,15 @@ function LanguageCombobox({
           ))}
           {showCreate ? (
             <ComboboxOption
-              value={needle}
+              value={trimmedQuery}
               className='group mt-1 flex cursor-pointer items-center gap-2.5 rounded-lg border border-dashed border-white/10 px-2.5 py-2 text-[13px] text-stone-300 transition data-focus:border-stone-300/40 data-focus:bg-white/9'
             >
               <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-(--relay-tracking-wide) text-stone-300'>
-                {needle.toUpperCase()}
+                {trimmedQuery.slice(0, 3).toUpperCase()}
               </span>
               <span>
-                Use custom code &quot;<span className='text-stone-200'>{needle}</span>&quot;
+                Use custom language &quot;
+                <span className='text-stone-200'>{trimmedQuery}</span>&quot;
               </span>
             </ComboboxOption>
           ) : null}
@@ -979,7 +1104,7 @@ function ShortcutRow({
   );
 }
 
-function ActionRow({
+function BrowseLinkRow({
   label,
   onClick,
   icon,
@@ -992,7 +1117,7 @@ function ActionRow({
     <button
       type='button'
       onClick={onClick}
-      className='flex items-center justify-between rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 text-left text-[12px] text-stone-100 transition hover:border-white/12 hover:bg-white/8'
+      className='flex cursor-pointer items-center justify-between rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 text-left text-[12px] text-stone-100 transition hover:border-white/12 hover:bg-white/8'
     >
       <span className='inline-flex items-center gap-2'>
         {icon}
@@ -1003,13 +1128,44 @@ function ActionRow({
   );
 }
 
-function MetricRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className='rounded-xl border border-white/8 bg-white/2 px-3 py-2.5'>
+function LabeledInfoRow({
+  label,
+  value,
+  onClick,
+  icon,
+}: {
+  label: string;
+  value: string;
+  onClick?: () => void;
+  icon?: ReactNode;
+}) {
+  const content = (
+    <>
       <p className='text-[10.5px] text-stone-500'>{label}</p>
-      <p className='mt-1 break-all text-[13px] text-stone-100'>{value}</p>
-    </div>
+      {icon ? (
+        <p className='mt-1 inline-flex items-center gap-2 break-all text-[13px] text-stone-100'>
+          {icon}
+          <span>{value}</span>
+        </p>
+      ) : (
+        <p className='mt-1 break-all text-[13px] text-stone-100'>{value}</p>
+      )}
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type='button'
+        onClick={onClick}
+        className='cursor-pointer rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 text-left transition hover:border-white/12 hover:bg-white/8'
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className='rounded-xl border border-white/8 bg-white/2 px-3 py-2.5'>{content}</div>;
 }
 
 function InlineNote({ children }: PropsWithChildren) {

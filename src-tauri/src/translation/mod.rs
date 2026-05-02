@@ -14,7 +14,9 @@ use llama_cpp_2::token::LlamaToken;
 use serde_json::json;
 
 use crate::constants::{
-    MAX_GENERATION_TOKENS, MIN_GENERATION_TOKENS, TRANSLATION_MODEL_EXTENSIONS,
+    MAX_GENERATION_TOKENS, MAX_TRANSLATION_CONTEXT_TOKENS, MAX_WORKER_THREADS,
+    MIN_GENERATION_TOKENS, MIN_TRANSLATION_CONTEXT_TOKENS, MIN_WORKER_THREADS,
+    TRANSLATION_MODEL_EXTENSIONS,
 };
 use crate::domain::{ServiceHealth, TranslationSettings};
 use crate::ggml;
@@ -295,28 +297,27 @@ fn generate_translation(
     settings: &TranslationSettings,
     prompt: &str,
 ) -> Result<String> {
-    // Clamp on both ends using the central constants. MIN_GENERATION_TOKENS
-    // (1) rejects 0-token requests that would always produce the empty-
-    // translation error below; MAX_GENERATION_TOKENS bounds memory/latency
-    // regardless of what's in settings.toml.
-    let max_tokens = settings
-        .max_tokens
-        .clamp(MIN_GENERATION_TOKENS, MAX_GENERATION_TOKENS);
+    let config = translation_runtime_config(settings);
     let context_params = LlamaContextParams::default()
-        .with_n_ctx(NonZeroU32::new(2048))
-        .with_n_batch(2048)
+        .with_n_ctx(NonZeroU32::new(config.context_tokens))
+        .with_n_batch(config.context_tokens)
         .with_n_ubatch(512)
-        .with_n_threads(8)
-        .with_n_threads_batch(8);
+        .with_n_threads(config.threads as i32)
+        .with_n_threads_batch(config.threads as i32);
     let mut context = runtime.model.new_context(runtime.backend, context_params)?;
     let prompt_tokens = runtime.model.str_to_token(prompt, AddBos::Always)?;
-    let mut batch = LlamaBatch::new(prompt_tokens.len().saturating_add(max_tokens as usize), 1);
+    let mut batch = LlamaBatch::new(
+        prompt_tokens
+            .len()
+            .saturating_add(config.max_tokens as usize),
+        1,
+    );
     batch.add_sequence(&prompt_tokens, 0, false)?;
     context.decode(&mut batch)?;
 
     let mut sampler = LlamaSampler::chain_simple([LlamaSampler::greedy()]);
     let mut generated = String::new();
-    for (next_position, _) in ((prompt_tokens.len() as i32)..).zip(0..max_tokens) {
+    for (next_position, _) in ((prompt_tokens.len() as i32)..).zip(0..config.max_tokens) {
         // llama.cpp only exposes logits for the last prompt token on the initial decode when
         // `logits_all` is false. Sampling from index 0 can therefore hit a native assert on
         // non-trivial prompts; `-1` means "use the last available output", which is the
@@ -346,6 +347,32 @@ fn generate_translation(
     Ok(cleaned)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TranslationRuntimeConfig {
+    max_tokens: u32,
+    context_tokens: u32,
+    threads: u32,
+}
+
+fn translation_runtime_config(settings: &TranslationSettings) -> TranslationRuntimeConfig {
+    TranslationRuntimeConfig {
+        // Clamp on both ends using the central constants. MIN_GENERATION_TOKENS
+        // (1) rejects 0-token requests that would always produce the empty-
+        // translation error below; MAX_GENERATION_TOKENS bounds memory/latency
+        // regardless of what's in settings.toml.
+        max_tokens: settings
+            .max_tokens
+            .clamp(MIN_GENERATION_TOKENS, MAX_GENERATION_TOKENS),
+        context_tokens: settings.context_tokens.clamp(
+            MIN_TRANSLATION_CONTEXT_TOKENS,
+            MAX_TRANSLATION_CONTEXT_TOKENS,
+        ),
+        threads: settings
+            .threads
+            .clamp(MIN_WORKER_THREADS, MAX_WORKER_THREADS),
+    }
+}
+
 fn decode_token_piece(model: &LlamaModel, token: LlamaToken) -> Result<String> {
     let bytes = match model.token_to_piece_bytes(token, 8, true, None) {
         Ok(bytes) => bytes,
@@ -371,8 +398,14 @@ mod tests {
 
     use uuid::Uuid;
 
-    use super::{check_settings_blocking, runtime_state, translate_blocking, TranslationRequest};
-    use crate::constants::DEFAULT_TARGET_LANGUAGE;
+    use super::{
+        check_settings_blocking, runtime_state, translate_blocking, translation_runtime_config,
+        TranslationRequest,
+    };
+    use crate::constants::{
+        DEFAULT_TARGET_LANGUAGE, MAX_TRANSLATION_CONTEXT_TOKENS, MIN_GENERATION_TOKENS,
+        MIN_WORKER_THREADS,
+    };
     use crate::domain::{ServiceHealth, TranslationSettings};
 
     /// Acquire the cross-module ggml test lock and reset the shutdown flag
@@ -422,6 +455,22 @@ mod tests {
 
         let result = translate_blocking(settings, request).expect("empty input is Ok");
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn runtime_config_clamps_manual_settings_file_values() {
+        let settings = TranslationSettings {
+            max_tokens: 0,
+            context_tokens: u32::MAX,
+            threads: 0,
+            ..TranslationSettings::default()
+        };
+
+        let config = translation_runtime_config(&settings);
+
+        assert_eq!(config.max_tokens, MIN_GENERATION_TOKENS);
+        assert_eq!(config.context_tokens, MAX_TRANSLATION_CONTEXT_TOKENS);
+        assert_eq!(config.threads, MIN_WORKER_THREADS);
     }
 
     #[test]

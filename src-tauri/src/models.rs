@@ -175,8 +175,11 @@ fn collect_model_candidates(
     }
 
     if !selected_model.is_empty() {
+        let already_listed = out.values().any(|model| {
+            model.kind == kind && model_references_equal(&model.relative_path, &selected_model)
+        });
         let selected_path = root.join(&selected_model);
-        if has_supported_extension(&selected_path, extensions) {
+        if !already_listed && has_supported_extension(&selected_path, extensions) {
             register_model(out, kind, selected_path, root, &selected_model);
         }
     }
@@ -206,7 +209,8 @@ fn register_model(
                 .unwrap_or("Unknown model")
                 .to_string()
         });
-    let active = !selected_model.is_empty() && relative_path == selected_model;
+    let active =
+        !selected_model.is_empty() && model_references_equal(&relative_path, selected_model);
     let state = if active {
         if exists {
             ModelState::Active
@@ -235,12 +239,9 @@ fn register_model(
         download_url: recommended.map(|value| value.url.to_string()),
     };
 
-    out.entry((kind, path_string))
-        .and_modify(|current| {
-            if matches!(record.state, ModelState::Active | ModelState::Missing) {
-                *current = record.clone();
-            }
-        })
+    let key = model_record_key(kind, &path_string, &record);
+    out.entry(key)
+        .and_modify(|current| replace_with_preferred_model(current, &record))
         .or_insert(record);
 }
 
@@ -248,12 +249,10 @@ pub(crate) async fn download_recommended_model_file(
     root: &Path,
     kind: ModelKind,
 ) -> Result<PathBuf> {
-    let model =
-        recommended_model(kind).ok_or_else(|| anyhow!("no recommended model for {kind:?}"))?;
     fs::create_dir_all(root)
         .with_context(|| format!("create model directory {}", root.display()))?;
 
-    let target = root.join(model.relative_path);
+    let target = recommended_model_target(root, kind)?;
     if let Ok(metadata) = fs::metadata(&target) {
         if metadata.is_file() {
             return Ok(target);
@@ -276,6 +275,8 @@ pub(crate) async fn download_recommended_model_file(
         .ok_or_else(|| anyhow!("recommended model target has invalid file name"))?;
     let temp_path = parent.join(format!("{file_name}.download.{}", Uuid::new_v4()));
 
+    let model =
+        recommended_model(kind).ok_or_else(|| anyhow!("no recommended model for {kind:?}"))?;
     let result = download_to_path(model.url, &temp_path)
         .await
         .and_then(|()| {
@@ -293,6 +294,41 @@ pub(crate) async fn download_recommended_model_file(
             let _ = fs::remove_file(&temp_path);
             Err(error)
         }
+    }
+}
+
+fn recommended_model_target(root: &Path, kind: ModelKind) -> Result<PathBuf> {
+    let model =
+        recommended_model(kind).ok_or_else(|| anyhow!("no recommended model for {kind:?}"))?;
+    Ok(root.join(model.relative_path))
+}
+
+fn model_record_key(
+    kind: ModelKind,
+    path_string: &str,
+    record: &ModelRecord,
+) -> (ModelKind, String) {
+    if record.recommended {
+        return (
+            kind,
+            format!("recommended:{}", record.relative_path.to_lowercase()),
+        );
+    }
+
+    (kind, path_string.to_string())
+}
+
+fn replace_with_preferred_model(current: &mut ModelRecord, next: &ModelRecord) {
+    if model_state_rank(next.state) > model_state_rank(current.state) {
+        *current = next.clone();
+    }
+}
+
+fn model_state_rank(state: ModelState) -> u8 {
+    match state {
+        ModelState::Missing => 1,
+        ModelState::Available => 2,
+        ModelState::Active => 3,
     }
 }
 
@@ -364,8 +400,8 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        collect_models, validate_model_file_extension, TRANSLATION_MODEL_EXTENSIONS,
-        WHISPER_MODEL_EXTENSIONS,
+        collect_models, recommended_model_target, validate_model_file_extension,
+        TRANSLATION_MODEL_EXTENSIONS, WHISPER_MODEL_EXTENSIONS,
     };
     use crate::domain::{ModelKind, ModelState, RelaySettings};
 
@@ -439,6 +475,30 @@ mod tests {
     }
 
     #[test]
+    fn selected_recommended_model_matches_case_insensitively_without_duplicate_rows() {
+        let root = std::env::temp_dir().join(format!("relay-models-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temp model dir");
+        fs::write(root.join("qwen2.5-3b-instruct-q5_k_m.gguf"), b"stub")
+            .expect("write recommended model");
+
+        let mut settings = RelaySettings::default();
+        settings.translation.model_path = root.to_string_lossy().to_string();
+        settings.translation.selected_model = "Qwen2.5-3B-Instruct-Q5_K_M.gguf".to_string();
+
+        let models = collect_models(&settings);
+        let recommended_models = models
+            .iter()
+            .filter(|model| model.kind == ModelKind::Translation && model.recommended)
+            .collect::<Vec<_>>();
+        assert_eq!(recommended_models.len(), 1);
+        let recommended = recommended_models[0];
+        assert_eq!(recommended.relative_path, "qwen2.5-3b-instruct-q5_k_m.gguf");
+        assert_eq!(recommended.state, ModelState::Active);
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn keeps_missing_selected_model_when_recommended_file_case_differs() {
         let root = std::env::temp_dir().join(format!("relay-models-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).expect("create temp model dir");
@@ -477,6 +537,15 @@ mod tests {
         assert_eq!(selected.state, ModelState::Missing);
 
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn recommended_download_target_uses_relative_path_not_url_file_name() {
+        let root = std::env::temp_dir().join("relay-models");
+        let target =
+            recommended_model_target(&root, ModelKind::Translation).expect("recommended target");
+
+        assert_eq!(target, root.join("Qwen2.5-3B-Instruct-Q5_K_M.gguf"));
     }
 
     /// Symlink loop must not hang or stack-overflow `collect_models`. Without

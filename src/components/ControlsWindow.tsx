@@ -278,6 +278,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                   actions={
                     <ClearLogButton
                       label='Clear transcript log'
+                      disabled={originalEntries.length === 0}
                       onClick={() => void run(clearSegments)}
                     />
                   }
@@ -303,6 +304,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                   actions={
                     <ClearLogButton
                       label='Clear translation log'
+                      disabled={translationEntries.length === 0}
                       onClick={() => void run(clearTranslationLog)}
                     />
                   }

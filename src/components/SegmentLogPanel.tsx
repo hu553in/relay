@@ -38,6 +38,7 @@ export function SegmentLogPanel({
   onCopyError?: (reason: unknown) => void;
 }) {
   const { autoFollow, containerRef, handleScroll, jumpToLatest } = useLiveLogScroll(entries.length);
+  const hasCopyableEntries = entries.some(entry => entry.text.trim().length > 0);
 
   async function copyLog() {
     const payload = entries
@@ -82,7 +83,12 @@ export function SegmentLogPanel({
         </div>
         <div className='flex items-center gap-1.5'>
           {actions}
-          <IconButton label='Copy log' onClick={() => void copyLog()} icon={<Copy size={14} />} />
+          <IconButton
+            label='Copy log'
+            onClick={() => void copyLog()}
+            disabled={!hasCopyableEntries}
+            icon={<Copy size={14} />}
+          />
         </div>
       </header>
 

@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::{
     DEFAULT_MAX_TOKENS, DEFAULT_TARGET_LANGUAGE, DEFAULT_TOGGLE_LISTENING_SHORTCUT,
-    DEFAULT_TOGGLE_OVERLAY_SHORTCUT,
+    DEFAULT_TOGGLE_OVERLAY_SHORTCUT, DEFAULT_TRANSCRIPTION_HOP_SECONDS,
+    DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS, DEFAULT_TRANSCRIPTION_THREADS,
+    DEFAULT_TRANSCRIPTION_WINDOW_SECONDS, DEFAULT_TRANSLATION_CONTEXT_TOKENS,
+    DEFAULT_TRANSLATION_THREADS,
 };
 use crate::domain::{OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings};
 
@@ -142,11 +145,17 @@ impl SettingsFile {
             system_audio_enabled: self.inputs.system_audio,
             stt_model_path: self.transcription.models_dir,
             stt_selected_model: self.transcription.model_file,
+            stt_threads: self.transcription.threads,
+            stt_window_seconds: self.transcription.window_seconds,
+            stt_hop_seconds: self.transcription.hop_seconds,
+            stt_sentence_timeout_ms: self.transcription.sentence_timeout_ms,
             translation: TranslationSettings {
                 model_path: self.translation.models_dir,
                 selected_model: self.translation.model_file,
                 target_language: self.translation.target_language,
                 max_tokens: self.translation.max_tokens,
+                context_tokens: self.translation.context_tokens,
+                threads: self.translation.threads,
             },
             overlay: OverlaySettings {
                 visible: self.overlay.visible,
@@ -170,12 +179,18 @@ impl From<&RelaySettings> for SettingsFile {
             transcription: TranscriptionFile {
                 models_dir: settings.stt_model_path.clone(),
                 model_file: settings.stt_selected_model.clone(),
+                threads: settings.stt_threads,
+                window_seconds: settings.stt_window_seconds,
+                hop_seconds: settings.stt_hop_seconds,
+                sentence_timeout_ms: settings.stt_sentence_timeout_ms,
             },
             translation: TranslationFile {
                 models_dir: settings.translation.model_path.clone(),
                 model_file: settings.translation.selected_model.clone(),
                 target_language: settings.translation.target_language.clone(),
                 max_tokens: settings.translation.max_tokens,
+                context_tokens: settings.translation.context_tokens,
+                threads: settings.translation.threads,
             },
             overlay: OverlayFile {
                 visible: settings.overlay.visible,
@@ -207,13 +222,34 @@ impl Default for InputsFile {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TranscriptionFile {
     #[serde(default)]
     models_dir: String,
     #[serde(default)]
     model_file: String,
+    #[serde(default = "default_transcription_threads")]
+    threads: u32,
+    #[serde(default = "default_transcription_window_seconds")]
+    window_seconds: u32,
+    #[serde(default = "default_transcription_hop_seconds")]
+    hop_seconds: u32,
+    #[serde(default = "default_transcription_sentence_timeout_ms")]
+    sentence_timeout_ms: u32,
+}
+
+impl Default for TranscriptionFile {
+    fn default() -> Self {
+        Self {
+            models_dir: String::new(),
+            model_file: String::new(),
+            threads: default_transcription_threads(),
+            window_seconds: default_transcription_window_seconds(),
+            hop_seconds: default_transcription_hop_seconds(),
+            sentence_timeout_ms: default_transcription_sentence_timeout_ms(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,6 +263,10 @@ struct TranslationFile {
     target_language: String,
     #[serde(default = "default_max_tokens")]
     max_tokens: u32,
+    #[serde(default = "default_translation_context_tokens")]
+    context_tokens: u32,
+    #[serde(default = "default_translation_threads")]
+    threads: u32,
 }
 
 impl Default for TranslationFile {
@@ -236,6 +276,8 @@ impl Default for TranslationFile {
             model_file: String::new(),
             target_language: default_target_language(),
             max_tokens: default_max_tokens(),
+            context_tokens: default_translation_context_tokens(),
+            threads: default_translation_threads(),
         }
     }
 }
@@ -292,6 +334,30 @@ const fn default_max_tokens() -> u32 {
     DEFAULT_MAX_TOKENS
 }
 
+const fn default_translation_context_tokens() -> u32 {
+    DEFAULT_TRANSLATION_CONTEXT_TOKENS
+}
+
+const fn default_translation_threads() -> u32 {
+    DEFAULT_TRANSLATION_THREADS
+}
+
+const fn default_transcription_threads() -> u32 {
+    DEFAULT_TRANSCRIPTION_THREADS
+}
+
+const fn default_transcription_window_seconds() -> u32 {
+    DEFAULT_TRANSCRIPTION_WINDOW_SECONDS
+}
+
+const fn default_transcription_hop_seconds() -> u32 {
+    DEFAULT_TRANSCRIPTION_HOP_SECONDS
+}
+
+const fn default_transcription_sentence_timeout_ms() -> u32 {
+    DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS
+}
+
 fn default_toggle_listening() -> String {
     DEFAULT_TOGGLE_LISTENING_SHORTCUT.to_string()
 }
@@ -344,7 +410,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::{parse_settings, write_atomic, SettingsFile, SettingsStore};
-    use crate::domain::RelaySettings;
+    use crate::domain::{OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings};
 
     #[test]
     fn parses_sectioned_toml_settings() {
@@ -357,12 +423,18 @@ system_audio = true
 [transcription]
 models_dir = "/models/stt"
 model_file = "ggml-small.bin"
+threads = 6
+window_seconds = 5
+hop_seconds = 1
+sentence_timeout_ms = 12000
 
 [translation]
 models_dir = "/models/translation"
 model_file = "nested/qwen.gguf"
 target_language = "de"
 max_tokens = 64
+context_tokens = 4096
+threads = 10
 
 [overlay]
 visible = false
@@ -379,10 +451,16 @@ toggle_overlay = "CmdOrCtrl+Shift+Y"
         assert!(settings.system_audio_enabled);
         assert_eq!(settings.stt_model_path, "/models/stt");
         assert_eq!(settings.stt_selected_model, "ggml-small.bin");
+        assert_eq!(settings.stt_threads, 6);
+        assert_eq!(settings.stt_window_seconds, 5);
+        assert_eq!(settings.stt_hop_seconds, 1);
+        assert_eq!(settings.stt_sentence_timeout_ms, 12_000);
         assert_eq!(settings.translation.model_path, "/models/translation");
         assert_eq!(settings.translation.selected_model, "nested/qwen.gguf");
         assert_eq!(settings.translation.target_language, "de");
         assert_eq!(settings.translation.max_tokens, 64);
+        assert_eq!(settings.translation.context_tokens, 4096);
+        assert_eq!(settings.translation.threads, 10);
         assert!(!settings.overlay.visible);
         assert!(!settings.overlay.always_on_top);
         assert_eq!(settings.shortcuts.toggle_listening, "CmdOrCtrl+Shift+T");
@@ -400,6 +478,38 @@ unknown_setting = true
         .expect_err("unknown fields should be rejected");
 
         assert!(error.to_string().contains("unknown_setting"));
+    }
+
+    #[test]
+    fn older_settings_files_get_runtime_tuning_defaults() {
+        let settings = parse_settings(
+            r#"
+[transcription]
+models_dir = "/models/stt"
+model_file = "ggml-small.bin"
+
+[translation]
+models_dir = "/models/translation"
+model_file = "qwen.gguf"
+target_language = "de"
+max_tokens = 64
+"#,
+        )
+        .expect("older TOML should parse");
+
+        let defaults = RelaySettings::default();
+        assert_eq!(settings.stt_threads, defaults.stt_threads);
+        assert_eq!(settings.stt_window_seconds, defaults.stt_window_seconds);
+        assert_eq!(settings.stt_hop_seconds, defaults.stt_hop_seconds);
+        assert_eq!(
+            settings.stt_sentence_timeout_ms,
+            defaults.stt_sentence_timeout_ms
+        );
+        assert_eq!(
+            settings.translation.context_tokens,
+            defaults.translation.context_tokens
+        );
+        assert_eq!(settings.translation.threads, defaults.translation.threads);
     }
 
     /// Defaults must round-trip cleanly through serialize → parse to keep the
@@ -454,10 +564,28 @@ unknown_setting = true
         let dir = std::env::temp_dir().join(format!("relay-settings-{}", Uuid::new_v4()));
         let path = dir.join("settings.toml");
         let store = SettingsStore { path };
-        let mut settings = RelaySettings::default();
-        settings.translation.target_language = "de".to_string();
-        settings.translation.max_tokens = 64;
-        settings.overlay.visible = false;
+        let settings = RelaySettings {
+            stt_threads: 6,
+            stt_window_seconds: 5,
+            stt_hop_seconds: 1,
+            stt_sentence_timeout_ms: 12_000,
+            translation: TranslationSettings {
+                target_language: "de".to_string(),
+                max_tokens: 64,
+                context_tokens: 4096,
+                threads: 10,
+                ..TranslationSettings::default()
+            },
+            shortcuts: ShortcutSettings {
+                toggle_listening: "CmdOrCtrl+Shift+J".to_string(),
+                toggle_overlay: "CmdOrCtrl+Shift+K".to_string(),
+            },
+            overlay: OverlaySettings {
+                visible: false,
+                ..OverlaySettings::default()
+            },
+            ..RelaySettings::default()
+        };
 
         store.save(&settings).expect("save");
         let loaded = store.load();

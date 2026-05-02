@@ -14,6 +14,7 @@ export function ShortcutInputField({
     toDraft: text => text,
     fromDraft: text => text.trim(),
     commit: onCommit,
+    commitUnchangedOnBlur: true,
   });
 
   return (
