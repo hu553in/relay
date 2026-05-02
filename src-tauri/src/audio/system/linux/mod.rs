@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use tokio::sync::mpsc;
 
 use crate::audio::RawAudioChunk;
-use crate::domain::{InputSource, SourceCapability};
+use crate::domain::SourceCapability;
 
 use super::{AudioErrorCallback, SystemAudioBackend};
 
