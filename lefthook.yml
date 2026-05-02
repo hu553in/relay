@@ -49,6 +49,9 @@ check:
     - name: typecheck
       run: pnpm exec tsc --noEmit
 
+    - name: frontend-test
+      run: pnpm test:frontend
+
     - name: cargo-fmt
       run: >-
         cargo fmt --manifest-path src-tauri/Cargo.toml --all --check --
@@ -77,6 +80,9 @@ check-fix:
 
     - name: typecheck
       run: pnpm exec tsc --noEmit
+
+    - name: frontend-test
+      run: pnpm test:frontend
 
     - name: cargo-fmt
       run: >-

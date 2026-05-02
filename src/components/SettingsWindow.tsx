@@ -15,6 +15,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Download,
   FileCode2,
   FileSearchCorner,
   FolderOpen,
@@ -31,6 +32,7 @@ import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { type LogEntry, SegmentLogPanel } from '@/components/SegmentLogPanel';
 import { MaxTokensField } from '@/components/settings/MaxTokensField';
 import { PathInputField } from '@/components/settings/PathInputField';
+import { ShortcutInputField } from '@/components/settings/ShortcutInputField';
 import { Badge } from '@/components/shared/Badge';
 import { HealthBadge } from '@/components/shared/HealthBadge';
 import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
@@ -42,7 +44,13 @@ import { useToastCenter } from '@/hooks/useToastCenter';
 import { diagnosticLevelTone } from '@/lib/diagnostics';
 import { toErrorMessage } from '@/lib/errors';
 import { formatModelSize } from '@/lib/format';
-import { clearDiagnostics, getAppPaths, getConfigPreview, updateSettings } from '@/lib/relay';
+import {
+  clearDiagnostics,
+  downloadRecommendedModel,
+  getAppPaths,
+  getConfigPreview,
+  updateSettings,
+} from '@/lib/relay';
 import type {
   AppPaths,
   ModelKind,
@@ -161,12 +169,28 @@ const MODEL_STATE_LABELS: Record<ModelState, string> = {
   missing: 'Missing',
 };
 
+const MODEL_STATE_ORDER: Record<ModelState, number> = {
+  active: 0,
+  available: 1,
+  missing: 2,
+};
+
+function compareModelRecords(left: ModelRecord, right: ModelRecord) {
+  if (left.recommended !== right.recommended) {
+    return left.recommended ? -1 : 1;
+  }
+  const stateDelta = MODEL_STATE_ORDER[left.state] - MODEL_STATE_ORDER[right.state];
+  if (stateDelta !== 0) return stateDelta;
+  return left.relativePath.localeCompare(right.relativePath);
+}
+
 export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const snapshot = relay.snapshot;
   const [activeSection, setActiveSection] = useState<SettingsSection>('inputs');
   const [version, setVersion] = useState('0.1.0');
   const [configPreview, setConfigPreview] = useState('');
   const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
+  const [downloadingModelKind, setDownloadingModelKind] = useState<ModelKind | null>(null);
   const constants = useAppConstants();
   const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics ?? []);
 
@@ -221,7 +245,8 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             model.relativePath === sttSelectedModel && model.state !== 'missing'
               ? ('active' as const)
               : model.state,
-        })),
+        }))
+        .sort(compareModelRecords),
     [allModels, sttSelectedModel]
   );
   const translationModels = useMemo(
@@ -234,7 +259,8 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             model.relativePath === translationSelectedModel && model.state !== 'missing'
               ? ('active' as const)
               : model.state,
-        })),
+        }))
+        .sort(compareModelRecords),
     [allModels, translationSelectedModel]
   );
   const diagnosticsEntries: LogEntry[] = useMemo(
@@ -313,6 +339,19 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
     await applySettings(next);
   };
 
+  const downloadRecommended = async (kind: ModelKind) => {
+    if (downloadingModelKind !== null) return;
+    setDownloadingModelKind(kind);
+    try {
+      await downloadRecommendedModel(kind);
+      await refreshConfigPreview();
+    } catch (reason: unknown) {
+      notifyError(reason);
+    } finally {
+      setDownloadingModelKind(null);
+    }
+  };
+
   const active = SECTION_BY_ID[activeSection];
 
   return (
@@ -384,16 +423,25 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       value={settings.sttModelPath}
                       placeholder='/Users/you/models/whisper'
                       onCommit={value => {
-                        void applySettings({ ...settings, sttModelPath: value });
+                        void applySettings({
+                          ...settings,
+                          sttModelPath: value,
+                          sttSelectedModel:
+                            value.trim() === settings.sttModelPath.trim()
+                              ? settings.sttSelectedModel
+                              : '',
+                        });
                       }}
                       onBrowse={() => void pickModelDirectory('transcription')}
                     />
                   </Field>
-                  <Field label='Found models'>
+                  <Field label='Models'>
                     <ModelsList
                       kind='transcription'
                       models={transcriptionModels}
                       onUse={chooseModel}
+                      onDownload={downloadRecommended}
+                      downloading={downloadingModelKind !== null}
                     />
                   </Field>
                   <InlineNote>
@@ -445,14 +493,27 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       onCommit={value => {
                         void applySettings({
                           ...settings,
-                          translation: { ...settings.translation, modelPath: value },
+                          translation: {
+                            ...settings.translation,
+                            modelPath: value,
+                            selectedModel:
+                              value.trim() === settings.translation.modelPath.trim()
+                                ? settings.translation.selectedModel
+                                : '',
+                          },
                         });
                       }}
                       onBrowse={() => void pickModelDirectory('translation')}
                     />
                   </Field>
-                  <Field label='Found models'>
-                    <ModelsList kind='translation' models={translationModels} onUse={chooseModel} />
+                  <Field label='Models'>
+                    <ModelsList
+                      kind='translation'
+                      models={translationModels}
+                      onUse={chooseModel}
+                      onDownload={downloadRecommended}
+                      downloading={downloadingModelKind !== null}
+                    />
                   </Field>
                   <Field
                     label='Max tokens'
@@ -490,15 +551,27 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
               <SectionGrid>
                 <SectionCard
                   title='Global shortcuts'
-                  description='Edit shortcuts only in the config file. App validates them on app startup and falls back to defaults if needed.'
+                  description='Edit shortcut text, then press Enter or click away to save.'
                 >
                   <ShortcutRow
                     label='Toggle listening'
                     value={settings.shortcuts.toggleListening}
+                    onCommit={value => {
+                      void applySettings({
+                        ...settings,
+                        shortcuts: { ...settings.shortcuts, toggleListening: value },
+                      });
+                    }}
                   />
                   <ShortcutRow
                     label='Show / hide overlay'
                     value={settings.shortcuts.toggleOverlay}
+                    onCommit={value => {
+                      void applySettings({
+                        ...settings,
+                        shortcuts: { ...settings.shortcuts, toggleOverlay: value },
+                      });
+                    }}
                   />
                   {snapshot.shortcutWarnings.length > 0 ? (
                     <div className='grid gap-2'>
@@ -809,10 +882,14 @@ function ModelsList({
   kind,
   models,
   onUse,
+  onDownload,
+  downloading,
 }: {
   kind: ModelKind;
   models: ModelRecord[];
   onUse: (kind: ModelKind, model: ModelRecord) => Promise<void>;
+  onDownload: (kind: ModelKind) => Promise<void>;
+  downloading: boolean;
 }) {
   if (models.length === 0) {
     return (
@@ -834,11 +911,28 @@ function ModelsList({
               </p>
               <p className='mt-1 break-all text-[11.5px] text-stone-400'>{model.path}</p>
             </div>
-            <ModelStateBadge state={model.state} />
+            <div className='flex shrink-0 items-center gap-1.5'>
+              {model.recommended ? (
+                <Badge tone='warning' className='text-[10px]'>
+                  Recommended
+                </Badge>
+              ) : null}
+              <ModelStateBadge state={model.state} />
+            </div>
           </div>
           <div className='mt-2 flex items-center justify-between gap-3'>
             <span className='text-[10.5px] text-stone-500'>{formatModelSize(model.sizeBytes)}</span>
-            {model.state !== 'active' ? (
+            {model.state !== 'active' && model.recommended && model.state === 'missing' ? (
+              <button
+                type='button'
+                onClick={() => void onDownload(kind)}
+                disabled={downloading}
+                className='inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/4 px-3 py-1.5 text-[12px] font-medium text-stone-100 transition hover:border-white/14 hover:bg-white/10 disabled:opacity-45'
+              >
+                <Download size={13} />
+                {downloading ? 'Downloading...' : 'Download model'}
+              </button>
+            ) : model.state !== 'active' ? (
               <button
                 type='button'
                 onClick={() => void onUse(kind, model)}
@@ -868,13 +962,19 @@ function HealthMessage({ health, detail }: { health: ServiceHealth; detail: stri
   );
 }
 
-function ShortcutRow({ label, value }: { label: string; value: string }) {
+function ShortcutRow({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  onCommit: (next: string) => void;
+}) {
   return (
     <div className='flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/2 px-3 py-3'>
       <span className='text-[13px] text-stone-200'>{label}</span>
-      <span className='rounded-lg bg-black/30 px-2.5 py-1 font-mono text-[12px] text-stone-300'>
-        {value}
-      </span>
+      <ShortcutInputField value={value} label={`${label} shortcut`} onCommit={onCommit} />
     </div>
   );
 }

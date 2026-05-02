@@ -1,11 +1,19 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+
+use anyhow::{anyhow, Context, Result};
+use reqwest::header::USER_AGENT;
+use uuid::Uuid;
 
 use crate::constants::{
     MAX_MODEL_WALK_DEPTH, TRANSLATION_MODEL_EXTENSIONS, WHISPER_MODEL_EXTENSIONS,
 };
 use crate::domain::{normalize_model_reference, ModelKind, ModelRecord, ModelState, RelaySettings};
+use crate::recommended_models::{
+    model_references_equal, recommended_model, recommended_model_by_reference,
+};
 
 pub(crate) fn collect_models(settings: &RelaySettings) -> Vec<ModelRecord> {
     let mut candidates = BTreeMap::<(ModelKind, String), ModelRecord>::new();
@@ -150,6 +158,22 @@ fn collect_model_candidates(
         }
     }
 
+    if let Some(recommended) = recommended_model(kind) {
+        let already_listed = out.values().any(|model| {
+            model.kind == kind
+                && model_references_equal(&model.relative_path, recommended.relative_path)
+        });
+        if !already_listed {
+            register_model(
+                out,
+                kind,
+                root.join(recommended.relative_path),
+                root,
+                &selected_model,
+            );
+        }
+    }
+
     if !selected_model.is_empty() {
         let selected_path = root.join(&selected_model);
         if has_supported_extension(&selected_path, extensions) {
@@ -194,6 +218,7 @@ fn register_model(
     } else {
         ModelState::Missing
     };
+    let recommended = recommended_model_by_reference(kind, &relative_path);
 
     let record = ModelRecord {
         kind,
@@ -206,6 +231,8 @@ fn register_model(
         path: path_string.clone(),
         size_bytes: metadata.map(|value| value.len()),
         state,
+        recommended: recommended.is_some(),
+        download_url: recommended.map(|value| value.url.to_string()),
     };
 
     out.entry((kind, path_string))
@@ -215,6 +242,84 @@ fn register_model(
             }
         })
         .or_insert(record);
+}
+
+pub(crate) async fn download_recommended_model_file(
+    root: &Path,
+    kind: ModelKind,
+) -> Result<PathBuf> {
+    let model =
+        recommended_model(kind).ok_or_else(|| anyhow!("no recommended model for {kind:?}"))?;
+    fs::create_dir_all(root)
+        .with_context(|| format!("create model directory {}", root.display()))?;
+
+    let target = root.join(model.relative_path);
+    if let Ok(metadata) = fs::metadata(&target) {
+        if metadata.is_file() {
+            return Ok(target);
+        }
+        return Err(anyhow!(
+            "recommended model path {} exists but is not a file",
+            target.display()
+        ));
+    }
+
+    let parent = target
+        .parent()
+        .ok_or_else(|| anyhow!("recommended model target has no parent directory"))?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("create model directory {}", parent.display()))?;
+
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| anyhow!("recommended model target has invalid file name"))?;
+    let temp_path = parent.join(format!("{file_name}.download.{}", Uuid::new_v4()));
+
+    let result = download_to_path(model.url, &temp_path)
+        .await
+        .and_then(|()| {
+            fs::rename(&temp_path, &target)
+                .with_context(|| format!("move downloaded model to {}", target.display()))
+        });
+
+    match result {
+        Ok(()) => Ok(target),
+        Err(_error) if target.is_file() => {
+            let _ = fs::remove_file(&temp_path);
+            Ok(target)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            Err(error)
+        }
+    }
+}
+
+async fn download_to_path(url: &str, path: &Path) -> Result<()> {
+    let client = reqwest::Client::new();
+    let mut response = client
+        .get(url)
+        .header(USER_AGENT, "Relay")
+        .send()
+        .await
+        .with_context(|| format!("request recommended model {url}"))?
+        .error_for_status()
+        .with_context(|| format!("download recommended model {url}"))?;
+
+    let mut file =
+        fs::File::create(path).with_context(|| format!("create temp file {}", path.display()))?;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .with_context(|| format!("stream recommended model {url}"))?
+    {
+        file.write_all(&chunk)
+            .with_context(|| format!("write temp file {}", path.display()))?;
+    }
+    file.sync_all()
+        .with_context(|| format!("sync temp file {}", path.display()))?;
+    Ok(())
 }
 
 fn has_supported_extension(path: &Path, extensions: &[&str]) -> bool {
@@ -277,7 +382,79 @@ mod tests {
         };
 
         let models = collect_models(&settings);
-        assert!(models.is_empty());
+        assert!(!models
+            .iter()
+            .any(|model| model.relative_path == "notes.txt"));
+        assert!(models
+            .iter()
+            .any(|model| model.recommended && model.state == ModelState::Missing));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn includes_recommended_model_as_missing_when_not_downloaded() {
+        let root = std::env::temp_dir().join(format!("relay-models-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temp model dir");
+
+        let settings = RelaySettings {
+            stt_model_path: root.to_string_lossy().to_string(),
+            ..RelaySettings::default()
+        };
+
+        let models = collect_models(&settings);
+        let recommended = models
+            .iter()
+            .find(|model| model.kind == ModelKind::Transcription && model.recommended)
+            .expect("recommended transcription model is listed");
+        assert_eq!(recommended.relative_path, "ggml-small.bin");
+        assert_eq!(recommended.state, ModelState::Missing);
+        assert!(recommended.download_url.is_some());
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn marks_recommended_model_available_when_exact_file_exists() {
+        let root = std::env::temp_dir().join(format!("relay-models-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temp model dir");
+        fs::write(root.join("qwen2.5-3b-instruct-q5_k_m.gguf"), b"stub")
+            .expect("write recommended model");
+
+        let mut settings = RelaySettings::default();
+        settings.translation.model_path = root.to_string_lossy().to_string();
+
+        let models = collect_models(&settings);
+        let recommended_models = models
+            .iter()
+            .filter(|model| model.kind == ModelKind::Translation && model.recommended)
+            .collect::<Vec<_>>();
+        assert_eq!(recommended_models.len(), 1);
+        let recommended = recommended_models[0];
+        assert_eq!(recommended.relative_path, "qwen2.5-3b-instruct-q5_k_m.gguf");
+        assert_eq!(recommended.state, ModelState::Available);
+        assert_eq!(recommended.size_bytes, Some(4));
+
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn keeps_missing_selected_model_when_recommended_file_case_differs() {
+        let root = std::env::temp_dir().join(format!("relay-models-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temp model dir");
+        fs::write(root.join("qwen2.5-3b-instruct-q5_k_m.gguf"), b"stub")
+            .expect("write recommended model");
+
+        let mut settings = RelaySettings::default();
+        settings.translation.model_path = root.to_string_lossy().to_string();
+        settings.translation.selected_model = "missing-selected.gguf".to_string();
+
+        let models = collect_models(&settings);
+        assert!(models.iter().any(|model| {
+            model.kind == ModelKind::Translation
+                && model.relative_path == "missing-selected.gguf"
+                && model.state == ModelState::Missing
+        }));
 
         fs::remove_dir_all(root).ok();
     }
@@ -292,10 +469,12 @@ mod tests {
         settings.translation.selected_model = "nested/missing.gguf".to_string();
 
         let models = collect_models(&settings);
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].kind, ModelKind::Translation);
-        assert_eq!(models[0].relative_path, "nested/missing.gguf");
-        assert_eq!(models[0].state, ModelState::Missing);
+        let selected = models
+            .iter()
+            .find(|model| model.relative_path == "nested/missing.gguf")
+            .expect("missing selected model is listed");
+        assert_eq!(selected.kind, ModelKind::Translation);
+        assert_eq!(selected.state, ModelState::Missing);
 
         fs::remove_dir_all(root).ok();
     }
@@ -326,7 +505,7 @@ mod tests {
         // loop would have re-discovered it.
         let translation_count = models
             .iter()
-            .filter(|m| m.kind == ModelKind::Translation)
+            .filter(|m| m.kind == ModelKind::Translation && m.relative_path == "nested/qwen.gguf")
             .count();
         assert_eq!(translation_count, 1);
 

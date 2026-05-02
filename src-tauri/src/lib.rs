@@ -8,6 +8,7 @@ mod ids;
 mod models;
 mod pipeline;
 mod platform;
+mod recommended_models;
 mod settings;
 mod shortcuts;
 mod transcription;
@@ -27,9 +28,9 @@ pub(crate) fn now_ms() -> u64 {
 }
 use app::RelayApp;
 use commands::{
-    clear_diagnostics, clear_transcript_log, clear_translation_log, get_app_constants,
-    get_app_paths, get_config_preview, get_snapshot, get_system_metrics, hide_overlay,
-    hide_settings, show_controls, show_overlay, show_settings, show_settings_section,
+    clear_diagnostics, clear_transcript_log, clear_translation_log, download_recommended_model,
+    get_app_constants, get_app_paths, get_config_preview, get_snapshot, get_system_metrics,
+    hide_overlay, hide_settings, show_controls, show_overlay, show_settings, show_settings_section,
     start_listening, stop_listening, update_settings,
 };
 use tauri::{AppHandle, Manager, RunEvent};
@@ -111,6 +112,7 @@ fn run_inner() -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             update_settings,
+            download_recommended_model,
             start_listening,
             stop_listening,
             show_overlay,

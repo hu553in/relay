@@ -5,11 +5,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc && vite build",
+    "build": "tsc --noEmit && vite build",
     "dev": "vite",
     "tauri": "tauri",
     "check": "lefthook run check --all-files --force",
     "check:fix": "lefthook run check-fix --all-files --force",
+    "test:frontend": "vitest run",
     "test:rust": "lefthook run rust-test --all-files --force",
     "prepare": "command -v lefthook && lefthook install || true",
     "release:patch": "release-it patch",
@@ -30,6 +31,8 @@
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2.11.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -44,6 +47,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-simple-import-sort": "^13.0.0",
     "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
     "lefthook": "^2.1.6",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
@@ -53,6 +57,7 @@
     "tailwindcss": "^4.2.4",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.59.1",
-    "vite": "^8.0.10"
+    "vite": "^8.0.10",
+    "vitest": "^4.1.5"
   }
 }

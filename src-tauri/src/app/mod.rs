@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -11,10 +12,11 @@ use uuid::Uuid;
 
 use crate::constants::{EVENT_SETTINGS_NAVIGATE, EVENT_SNAPSHOT};
 use crate::domain::{
-    AppPaths, AppSnapshot, DiagnosticsEntry, ListeningState, RelaySettings, SegmentRecord,
-    SegmentStatus, ServiceHealth, SourceCapability, SourceState, SystemMetrics, TemperatureReading,
+    AppPaths, AppSnapshot, DiagnosticsEntry, ListeningState, ModelKind, RelaySettings,
+    SegmentRecord, SegmentStatus, ServiceHealth, SourceCapability, SourceState, SystemMetrics,
+    TemperatureReading,
 };
-use crate::models::{collect_models, validate_model_directory};
+use crate::models::{collect_models, download_recommended_model_file, validate_model_directory};
 use crate::pipeline::{start_pipeline, PipelineHandle};
 use crate::settings::SettingsStore;
 use crate::shortcuts::normalize_shortcuts;
@@ -60,9 +62,11 @@ struct SystemProbe {
 impl RelayApp {
     pub(crate) fn bootstrap(app_handle: AppHandle) -> Result<Self> {
         let settings_store = SettingsStore::new();
+        settings_store.ensure_app_dirs()?;
         let loaded_settings = settings_store.load();
         let mut settings = loaded_settings.settings;
         settings.normalize_model_locations();
+        settings_store.apply_default_model_dirs(&mut settings);
         let shortcut_warnings = normalize_shortcuts(&mut settings.shortcuts);
         let mut snapshot = AppSnapshot {
             settings,
@@ -125,9 +129,13 @@ impl RelayApp {
             return self.snapshot_result();
         }
 
+        let previous_settings = self.snapshot_result()?.settings;
         let mut settings = settings;
         settings.normalize_model_locations();
+        self.inner.settings.apply_default_model_dirs(&mut settings);
+        clear_selected_models_after_directory_change(&previous_settings, &mut settings);
         let shortcut_warnings = normalize_shortcuts(&mut settings.shortcuts);
+        let shortcuts_changed = previous_settings.shortcuts != settings.shortcuts;
 
         let should_restart = {
             let mut guard = self.lock_state()?;
@@ -141,6 +149,16 @@ impl RelayApp {
         };
 
         self.persist_settings()?;
+        if shortcuts_changed {
+            if let Err(error) =
+                crate::shortcuts::refresh_global_shortcuts(&self.inner.app_handle, self)
+            {
+                self.push_diagnostic(
+                    "warning",
+                    format!("Global shortcuts saved but could not be registered: {error:#}"),
+                )?;
+            }
+        }
         self.refresh_runtime_healths()?;
         self.sync_overlay_window()?;
         self.emit_snapshot()?;
@@ -335,6 +353,19 @@ impl RelayApp {
         Ok(())
     }
 
+    pub(crate) fn toggle_controls_visibility(&self) -> Result<()> {
+        let window = self.window(crate::windowing::MAIN.label, "main")?;
+        if window.is_visible()? {
+            window.hide()?;
+        } else {
+            window.show()?;
+            window.unminimize()?;
+            window.set_focus()?;
+        }
+        self.sync_dock_visibility();
+        Ok(())
+    }
+
     pub(crate) fn show_settings(&self) -> Result<()> {
         let window = self.window(crate::windowing::SETTINGS.label, "settings")?;
         window.show()?;
@@ -397,6 +428,12 @@ impl RelayApp {
     pub(crate) fn app_paths(&self) -> AppPaths {
         AppPaths {
             config_file: self.inner.settings.path().to_string_lossy().to_string(),
+            models_dir: self
+                .inner
+                .settings
+                .models_dir()
+                .to_string_lossy()
+                .to_string(),
             diagnostics_log_file: self
                 .inner
                 .settings
@@ -404,6 +441,72 @@ impl RelayApp {
                 .to_string_lossy()
                 .to_string(),
         }
+    }
+
+    pub(crate) async fn download_recommended_model(&self, kind: ModelKind) -> Result<AppSnapshot> {
+        let settings = self.snapshot_result()?.settings;
+        let model_dir = match kind {
+            ModelKind::Transcription => PathBuf::from(settings.stt_model_path.trim()),
+            ModelKind::Translation => PathBuf::from(settings.translation.model_path.trim()),
+        };
+        let model_dir = if model_dir.as_os_str().is_empty() {
+            self.inner.settings.models_dir()
+        } else {
+            model_dir
+        };
+
+        self.push_diagnostic("info", format!("Downloading recommended {kind:?} model"))?;
+        let path = match download_recommended_model_file(&model_dir, kind).await {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = self.push_diagnostic(
+                    "error",
+                    format!("Recommended {kind:?} model download failed: {error:#}"),
+                );
+                return Err(error);
+            }
+        };
+        let relative_path = crate::recommended_models::recommended_model(kind)
+            .map(|model| model.relative_path)
+            .ok_or_else(|| anyhow!("no recommended model for {kind:?}"))?;
+        let mut next_settings = self.snapshot_result()?.settings;
+        match kind {
+            ModelKind::Transcription => {
+                if Path::new(next_settings.stt_model_path.trim()) != model_dir {
+                    self.push_diagnostic(
+                        "warning",
+                        format!(
+                            "Recommended {kind:?} model downloaded to {}, but the configured directory changed before selection.",
+                            path.display()
+                        ),
+                    )?;
+                    return self.snapshot_result();
+                }
+                next_settings.stt_model_path = model_dir.to_string_lossy().to_string();
+                next_settings.stt_selected_model = relative_path.to_string();
+            }
+            ModelKind::Translation => {
+                if Path::new(next_settings.translation.model_path.trim()) != model_dir {
+                    self.push_diagnostic(
+                        "warning",
+                        format!(
+                            "Recommended {kind:?} model downloaded to {}, but the configured directory changed before selection.",
+                            path.display()
+                        ),
+                    )?;
+                    return self.snapshot_result();
+                }
+                next_settings.translation.model_path = model_dir.to_string_lossy().to_string();
+                next_settings.translation.selected_model = relative_path.to_string();
+            }
+        }
+
+        self.update_settings(next_settings)?;
+        self.push_diagnostic(
+            "info",
+            format!("Recommended {kind:?} model is ready at {}", path.display()),
+        )?;
+        self.snapshot_result()
     }
 
     pub(crate) fn system_metrics(&self) -> Result<SystemMetrics> {
@@ -963,5 +1066,66 @@ fn apply_source_capability(source: &mut SourceState, capability: SourceCapabilit
         source.capturing = false;
         source.input_level = Some(0);
         source.health = ServiceHealth::Unavailable;
+    }
+}
+
+fn clear_selected_models_after_directory_change(
+    previous: &RelaySettings,
+    next: &mut RelaySettings,
+) {
+    if previous.stt_model_path != next.stt_model_path
+        && previous.stt_selected_model == next.stt_selected_model
+    {
+        next.stt_selected_model.clear();
+    }
+
+    if previous.translation.model_path != next.translation.model_path
+        && previous.translation.selected_model == next.translation.selected_model
+    {
+        next.translation.selected_model.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clear_selected_models_after_directory_change;
+    use crate::domain::{RelaySettings, TranslationSettings};
+
+    #[test]
+    fn model_directory_change_clears_stale_selection() {
+        let previous = RelaySettings {
+            stt_model_path: "/old/whisper".to_string(),
+            stt_selected_model: "ggml-small.bin".to_string(),
+            translation: TranslationSettings {
+                model_path: "/old/gguf".to_string(),
+                selected_model: "qwen.gguf".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut next = previous.clone();
+        next.stt_model_path = "/new/whisper".to_string();
+        next.translation.model_path = "/new/gguf".to_string();
+
+        clear_selected_models_after_directory_change(&previous, &mut next);
+
+        assert!(next.stt_selected_model.is_empty());
+        assert!(next.translation.selected_model.is_empty());
+    }
+
+    #[test]
+    fn model_directory_change_keeps_explicit_new_selection() {
+        let previous = RelaySettings {
+            stt_model_path: "/old/whisper".to_string(),
+            stt_selected_model: "old.bin".to_string(),
+            ..Default::default()
+        };
+        let mut next = previous.clone();
+        next.stt_model_path = "/new/whisper".to_string();
+        next.stt_selected_model = "new.bin".to_string();
+
+        clear_selected_models_after_directory_change(&previous, &mut next);
+
+        assert_eq!(next.stt_selected_model, "new.bin");
     }
 }

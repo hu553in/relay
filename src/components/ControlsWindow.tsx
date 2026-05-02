@@ -136,32 +136,34 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                 </div>
               </div>
 
-              <div className='flex flex-wrap items-center gap-2'>
-                <IconButton
-                  label={showStats ? 'Hide stats' : 'Show stats'}
-                  onClick={() => {
-                    setShowStats(value => !value);
-                  }}
-                  icon={showStats ? <House size={15} /> : <HeartPulse size={15} />}
-                />
-                <IconButton
-                  label='Open settings'
-                  onClick={() => void run(() => showSettingsSection('inputs'))}
-                  icon={<Settings size={15} />}
-                />
-                <IconButton
-                  label={snapshot.settings.overlay.visible ? 'Hide overlay' : 'Show overlay'}
-                  onClick={() =>
-                    void run(snapshot.settings.overlay.visible ? hideOverlay : showOverlay)
-                  }
-                  icon={
-                    snapshot.settings.overlay.visible ? (
-                      <CaptionsOff size={15} />
-                    ) : (
-                      <Captions size={15} />
-                    )
-                  }
-                />
+              <div className='flex flex-wrap items-center gap-4'>
+                <div className='flex items-center gap-2'>
+                  <IconButton
+                    label={showStats ? 'Hide stats' : 'Show stats'}
+                    onClick={() => {
+                      setShowStats(value => !value);
+                    }}
+                    icon={showStats ? <House size={15} /> : <HeartPulse size={15} />}
+                  />
+                  <IconButton
+                    label='Open settings'
+                    onClick={() => void run(() => showSettingsSection('inputs'))}
+                    icon={<Settings size={15} />}
+                  />
+                  <IconButton
+                    label={snapshot.settings.overlay.visible ? 'Hide overlay' : 'Show overlay'}
+                    onClick={() =>
+                      void run(snapshot.settings.overlay.visible ? hideOverlay : showOverlay)
+                    }
+                    icon={
+                      snapshot.settings.overlay.visible ? (
+                        <CaptionsOff size={15} />
+                      ) : (
+                        <Captions size={15} />
+                      )
+                    }
+                  />
+                </div>
                 <PrimaryButton
                   tone={isListening ? 'danger' : 'primary'}
                   disabled={isBusy || (!isListening && !canStartListening)}

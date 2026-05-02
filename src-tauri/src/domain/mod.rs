@@ -101,6 +101,8 @@ pub struct ModelRecord {
     pub path: String,
     pub size_bytes: Option<u64>,
     pub state: ModelState,
+    pub recommended: bool,
+    pub download_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -280,6 +282,7 @@ impl AppSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct AppPaths {
     pub config_file: String,
+    pub models_dir: String,
     pub diagnostics_log_file: String,
 }
 

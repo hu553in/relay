@@ -124,6 +124,12 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
             detail: "Translation model directory must point to a folder".to_string(),
         };
     }
+    if settings.selected_model_path().is_none() {
+        return TranslationHealthReport {
+            health: ServiceHealth::Unavailable,
+            detail: "Choose a GGUF translation model from the configured directory.".to_string(),
+        };
+    }
 
     // Refuse to touch the ggml backend if a graceful shutdown is in
     // progress. Without this, a settings refresh racing Cmd+Q would call
@@ -416,6 +422,26 @@ mod tests {
 
         let result = translate_blocking(settings, request).expect("empty input is Ok");
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn health_check_without_selected_model_stays_unavailable_without_runtime_lock() {
+        let _ggml_guard = acquire_ggml_lock();
+        let root = std::env::temp_dir().join(format!("relay-translation-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).expect("create temp translation dir");
+        let _runtime_guard = runtime_state().lock().expect("lock translation runtime");
+        let settings = TranslationSettings {
+            model_path: root.to_string_lossy().to_string(),
+            selected_model: String::new(),
+            ..TranslationSettings::default()
+        };
+
+        let report = check_settings_blocking(&settings);
+
+        assert_eq!(report.health, ServiceHealth::Unavailable);
+        assert!(report.detail.contains("Choose a GGUF translation model"));
+
+        fs::remove_dir_all(root).ok();
     }
 
     /// Once the ggml shutdown latch is set, both translate and check must

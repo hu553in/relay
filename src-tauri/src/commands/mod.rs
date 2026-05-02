@@ -2,7 +2,7 @@ use tauri::State;
 
 use crate::app::RelayApp;
 use crate::constants::{app_constants, AppConstants};
-use crate::domain::{AppPaths, AppSnapshot, RelaySettings, SystemMetrics};
+use crate::domain::{AppPaths, AppSnapshot, ModelKind, RelaySettings, SystemMetrics};
 
 /// Thin helper: every Tauri command returns `Result<T, String>` so that the
 /// webview sees a plain error message. This helper collapses the identical
@@ -22,6 +22,15 @@ pub(crate) fn update_settings(
     settings: RelaySettings,
 ) -> Result<AppSnapshot, String> {
     map_err(app.update_settings(settings))
+}
+
+#[tauri::command]
+pub(crate) async fn download_recommended_model(
+    app: State<'_, RelayApp>,
+    kind: ModelKind,
+) -> Result<AppSnapshot, String> {
+    let app = app.inner().clone();
+    map_err(app.download_recommended_model(kind).await)
 }
 
 #[tauri::command]

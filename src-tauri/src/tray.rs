@@ -164,7 +164,7 @@ pub(crate) fn handle_icon_event(app: &AppHandle, relay: &RelayApp, event: TrayIc
     } = event
     {
         if button == MouseButton::Left && button_state == MouseButtonState::Up {
-            if let Err(error) = relay.show_controls() {
+            if let Err(error) = relay.toggle_controls_visibility() {
                 tracing::warn!("tray left click failed: {error:#}");
             }
         }

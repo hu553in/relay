@@ -87,12 +87,36 @@ impl SettingsStore {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
+    pub(crate) fn models_dir(&self) -> PathBuf {
+        self.config_dir().join("models")
+    }
+
     pub(crate) fn logs_dir(&self) -> PathBuf {
         self.config_dir().join("logs")
     }
 
     pub(crate) fn diagnostics_log_path(&self) -> PathBuf {
         self.logs_dir().join("diagnostics.log")
+    }
+
+    pub(crate) fn ensure_app_dirs(&self) -> Result<()> {
+        fs::create_dir_all(self.config_dir())
+            .with_context(|| format!("create config dir {}", self.config_dir().display()))?;
+        fs::create_dir_all(self.models_dir())
+            .with_context(|| format!("create models dir {}", self.models_dir().display()))?;
+        fs::create_dir_all(self.logs_dir())
+            .with_context(|| format!("create logs dir {}", self.logs_dir().display()))?;
+        Ok(())
+    }
+
+    pub(crate) fn apply_default_model_dirs(&self, settings: &mut RelaySettings) {
+        let default_models_dir = self.models_dir().to_string_lossy().to_string();
+        if settings.stt_model_path.trim().is_empty() {
+            settings.stt_model_path = default_models_dir.clone();
+        }
+        if settings.translation.model_path.trim().is_empty() {
+            settings.translation.model_path = default_models_dir;
+        }
     }
 }
 
@@ -442,5 +466,21 @@ unknown_setting = true
         assert_eq!(loaded.settings, settings);
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn default_model_dirs_live_next_to_settings_and_logs() {
+        let dir = std::env::temp_dir().join(format!("relay-settings-{}", Uuid::new_v4()));
+        let store = SettingsStore {
+            path: dir.join("settings.toml"),
+        };
+        let mut settings = RelaySettings::default();
+
+        store.apply_default_model_dirs(&mut settings);
+
+        let expected = dir.join("models").to_string_lossy().to_string();
+        assert_eq!(settings.stt_model_path, expected);
+        assert_eq!(settings.translation.model_path, expected);
+        assert_eq!(store.logs_dir(), dir.join("logs"));
     }
 }

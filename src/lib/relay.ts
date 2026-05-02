@@ -1,6 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { AppConstants, AppPaths, AppSnapshot, RelaySettings, SystemMetrics } from './types';
+import type {
+  AppConstants,
+  AppPaths,
+  AppSnapshot,
+  ModelKind,
+  RelaySettings,
+  SystemMetrics,
+} from './types';
 
 export function getSnapshot() {
   return invoke<AppSnapshot>('get_snapshot');
@@ -8,6 +15,10 @@ export function getSnapshot() {
 
 export function updateSettings(settings: RelaySettings) {
   return invoke<AppSnapshot>('update_settings', { settings });
+}
+
+export function downloadRecommendedModel(kind: ModelKind) {
+  return invoke<AppSnapshot>('download_recommended_model', { kind });
 }
 
 export function startListening() {

@@ -4,7 +4,7 @@ use std::str::FromStr;
 #[cfg(desktop)]
 use anyhow::Result;
 #[cfg(desktop)]
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::Shortcut;
 #[cfg(desktop)]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -13,6 +13,12 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use crate::app::RelayApp;
 use crate::constants::DEFAULT_TOGGLE_LISTENING_SHORTCUT;
 use crate::domain::ShortcutSettings;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShortcutAction {
+    ToggleListening,
+    ToggleOverlay,
+}
 
 #[derive(Debug, Clone)]
 struct ResolvedShortcuts {
@@ -121,9 +127,7 @@ fn parse_or_default(
 pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Result<()> {
     let mut settings = relay.snapshot_result()?.settings.shortcuts;
     let resolved = resolve_shortcuts(&mut settings);
-    let toggle_listening = resolved.toggle_listening;
-    let toggle_overlay = resolved.toggle_overlay;
-    for warning in resolved.warnings {
+    for warning in &resolved.warnings {
         relay.push_diagnostic("warning", warning)?;
     }
 
@@ -146,21 +150,21 @@ pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Re
                     }
                 };
 
-                let result = if shortcut == &toggle_listening {
-                    match snapshot.listening_state {
+                let result = match shortcut_action(&snapshot.settings.shortcuts, shortcut) {
+                    Some(ShortcutAction::ToggleListening) => match snapshot.listening_state {
                         crate::domain::ListeningState::Listening => {
                             relay_for_handler.stop_listening()
                         }
                         _ => relay_for_handler.start_listening(),
+                    },
+                    Some(ShortcutAction::ToggleOverlay) => {
+                        if snapshot.settings.overlay.visible {
+                            relay_for_handler.hide_overlay()
+                        } else {
+                            relay_for_handler.show_overlay()
+                        }
                     }
-                } else if shortcut == &toggle_overlay {
-                    if snapshot.settings.overlay.visible {
-                        relay_for_handler.hide_overlay()
-                    } else {
-                        relay_for_handler.show_overlay()
-                    }
-                } else {
-                    Ok(())
+                    None => Ok(()),
                 };
 
                 if let Err(error) = result {
@@ -171,14 +175,58 @@ pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Re
             .build(),
     )?;
 
-    app.global_shortcut().register(toggle_listening)?;
-    app.global_shortcut().register(toggle_overlay)?;
+    register_resolved_shortcuts(app, &resolved)?;
     Ok(())
+}
+
+#[cfg(desktop)]
+pub(crate) fn refresh_global_shortcuts(app: &AppHandle, relay: &RelayApp) -> Result<()> {
+    if app
+        .try_state::<tauri_plugin_global_shortcut::GlobalShortcut<tauri::Wry>>()
+        .is_none()
+    {
+        return Ok(());
+    }
+
+    let mut settings = relay.snapshot_result()?.settings.shortcuts;
+    let resolved = resolve_shortcuts(&mut settings);
+    app.global_shortcut().unregister_all()?;
+    register_resolved_shortcuts(app, &resolved)
+}
+
+#[cfg(not(desktop))]
+pub(crate) fn refresh_global_shortcuts(_app: &AppHandle, _relay: &RelayApp) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(desktop)]
+fn register_resolved_shortcuts(app: &AppHandle, resolved: &ResolvedShortcuts) -> Result<()> {
+    app.global_shortcut()
+        .register_multiple([resolved.toggle_listening, resolved.toggle_overlay])?;
+    Ok(())
+}
+
+fn shortcut_action(settings: &ShortcutSettings, shortcut: &Shortcut) -> Option<ShortcutAction> {
+    let mut settings = settings.clone();
+    let resolved = resolve_shortcuts(&mut settings);
+    if shortcut == &resolved.toggle_listening {
+        Some(ShortcutAction::ToggleListening)
+    } else if shortcut == &resolved.toggle_overlay {
+        Some(ShortcutAction::ToggleOverlay)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_shortcuts, resolve_shortcuts, ShortcutSettings};
+    use std::str::FromStr;
+
+    use tauri_plugin_global_shortcut::Shortcut;
+
+    use super::{
+        normalize_shortcuts, resolve_shortcuts, shortcut_action, ShortcutAction, ShortcutSettings,
+    };
     use crate::constants::DEFAULT_TOGGLE_LISTENING_SHORTCUT;
 
     /// Defaults must resolve cleanly with no warnings — they are the contract
@@ -258,5 +306,28 @@ mod tests {
         // matters is we got two distinct Shortcuts and a non-empty warning.
         assert_ne!(resolved.toggle_listening.id(), resolved.toggle_overlay.id());
         assert!(!resolved.warnings.is_empty());
+    }
+
+    #[test]
+    fn shortcut_action_uses_current_settings() {
+        let settings = ShortcutSettings {
+            toggle_listening: "CmdOrCtrl+Shift+J".to_string(),
+            toggle_overlay: "CmdOrCtrl+Shift+K".to_string(),
+        };
+
+        let listening = Shortcut::from_str("CmdOrCtrl+Shift+J").expect("parse shortcut");
+        let overlay = Shortcut::from_str("CmdOrCtrl+Shift+K").expect("parse shortcut");
+        let old_default =
+            Shortcut::from_str(DEFAULT_TOGGLE_LISTENING_SHORTCUT).expect("parse default");
+
+        assert_eq!(
+            shortcut_action(&settings, &listening),
+            Some(ShortcutAction::ToggleListening)
+        );
+        assert_eq!(
+            shortcut_action(&settings, &overlay),
+            Some(ShortcutAction::ToggleOverlay)
+        );
+        assert_eq!(shortcut_action(&settings, &old_default), None);
     }
 }

@@ -38,6 +38,8 @@ export interface ModelRecord {
   path: string;
   sizeBytes: number | null;
   state: ModelState;
+  recommended: boolean;
+  downloadUrl: string | null;
 }
 
 export interface TranslationSettings {
@@ -107,6 +109,7 @@ export interface AppSnapshot {
 
 export interface AppPaths {
   configFile: string;
+  modelsDir: string;
   diagnosticsLogFile: string;
 }
 

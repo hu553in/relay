@@ -19,6 +19,7 @@ desktop app with platform-specific pieces isolated where practical.
 - Local speech-to-text with `whisper-rs` and Whisper GGML `.bin` models
 - Local translation with `llama-cpp-2` and llama.cpp-compatible GGUF chat or instruct models
 - Recursive model discovery from configured model directories
+- Recommended model rows with one-click download into the configured models directory
 - Transcript and translation logs with copy, clear, auto-scroll, and overlay support
 - TOML settings in the user config directory
 - Diagnostics UI and persisted diagnostics logs
@@ -69,16 +70,18 @@ the equivalent Tauri Linux dependencies.
 
 ## Models
 
-Relay does not download models automatically. Configure directories in Settings and choose discovered model
-files from those directories.
+Relay creates a default `models` directory next to its config and logs on first startup. Settings can still
+point transcription and translation at custom directories. The model list always shows a recommended row:
+if the exact recommended file is present in the configured directory, the row can be selected; otherwise,
+the row downloads that file into the configured directory and selects it after the download completes.
 
 ### Transcription models
 
 Supported transcription models are Whisper GGML `.bin` files compatible with whisper.cpp and whisper-rs.
 
-Recommended source:
+Recommended default: [`ggml-small.bin`](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin).
 
-- [ggerganov/whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
+Alternatives: [ggerganov/whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp/tree/main).
 
 Notes:
 
@@ -91,12 +94,13 @@ Notes:
 Supported translation models are GGUF files that can be loaded by llama.cpp and expose a usable chat
 template for instruction-style prompting.
 
-Discovery starting point:
+Recommended default: [`Qwen2.5-3B-Instruct-Q5_K_M.gguf`](https://huggingface.co/apto-as/Qwen2.5-3B-Instruct-Q5_K_M-GGUF/resolve/main/qwen2.5-3b-instruct-q5_k_m.gguf).
 
-- [Hugging Face GGUF translation candidates for llama.cpp](https://huggingface.co/models?pipeline_tag=translation&library=gguf&apps=llama.cpp)
+Discovery starting point for alternatives: [Hugging Face GGUF translation candidates for llama.cpp](https://huggingface.co/models?pipeline_tag=translation&library=gguf&apps=llama.cpp).
 
-That filter is not a compatibility guarantee. A model still needs to load locally, expose a usable chat
-template, fit available memory, and produce acceptable translation output.
+The recommended translation model is multilingual and compact enough for the current MVP target, but its
+license is the upstream Qwen model license. Any alternative still needs to load locally, expose a usable
+chat template, fit available memory, and produce acceptable translation output.
 
 Relay scans the configured translation models directory recursively for `.gguf` files.
 
@@ -114,6 +118,12 @@ The diagnostics log is stored at:
 ~/Library/Application Support/Relay/logs/diagnostics.log
 ```
 
+The default model directory is stored at:
+
+```text
+~/Library/Application Support/Relay/models
+```
+
 Example settings:
 
 ```toml
@@ -122,11 +132,11 @@ microphone = true
 system_audio = false
 
 [transcription]
-models_dir = "/Users/example/Models/whisper"
+models_dir = "/Users/Application Support/Relay/models"
 model_file = "ggml-small.bin"
 
 [translation]
-models_dir = "/Users/example/Models/translation"
+models_dir = "/Users/Application Support/Relay/models"
 model_file = "Qwen2.5-3B-Instruct-Q5_K_M.gguf"
 target_language = "en"
 max_tokens = 96
@@ -141,7 +151,8 @@ toggle_overlay = "CmdOrCtrl+Shift+O"
 ```
 
 Settings can be edited through the Settings window. The Raw config tab shows a read-only preview of the
-persisted TOML. Shortcut changes are loaded on app startup.
+persisted TOML. Shortcut text fields validate on save and active global shortcuts are re-registered after
+settings are saved.
 
 ## Development
 
@@ -157,9 +168,9 @@ pnpm build
 pnpm tauri build
 ```
 
-`pnpm check` runs static checks only: frontend lint/typecheck plus Rust fmt/check/clippy. Rust tests are
-separate so local checks and CI can report static failures independently from backend runtime tests.
-GitHub Actions runs Rust tests in a matrix across Ubuntu 22.04, Ubuntu 24.04, macOS, and Windows.
+`pnpm check` runs frontend lint/typecheck/unit tests plus Rust fmt/check/clippy. Rust tests are separate so
+local checks and CI can report static failures independently from backend runtime tests. GitHub Actions
+runs Rust tests in a matrix across Ubuntu 22.04, Ubuntu 24.04, macOS, and Windows.
 
 ## Project structure
 
@@ -172,6 +183,7 @@ GitHub Actions runs Rust tests in a matrix across Ubuntu 22.04, Ubuntu 24.04, ma
 - `src-tauri/src/transcription`: `whisper-rs` model loading and transcription.
 - `src-tauri/src/translation`: llama.cpp translation provider and health checks.
 - `src-tauri/src/settings`: TOML persistence and config path handling.
+- `src-tauri/src/recommended_models`: hardcoded recommended model metadata used by discovery and download.
 - `src-tauri/src/commands`: Tauri command boundary.
 - `src-tauri/src/platform`: platform-specific code.
 - `src`: React + TypeScript frontend.
