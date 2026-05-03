@@ -9,3 +9,7 @@ pub(crate) mod tray {
     pub(crate) const ABOUT: &str = "tray.about";
     pub(crate) const QUIT: &str = "tray.quit";
 }
+
+pub(crate) mod app_menu {
+    pub(crate) const QUIT: &str = "app.quit";
+}

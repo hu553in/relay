@@ -19,7 +19,7 @@ const OVERLAY_MAX_ROWS = 28;
 export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
   const snapshot = relay.snapshot;
   const constants = useAppConstants();
-  const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics ?? []);
+  const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics);
   const { originalEntries, translationEntries } = useSegmentLogEntries(snapshot, {
     idPrefix: 'overlay-',
     maxRows: OVERLAY_MAX_ROWS,

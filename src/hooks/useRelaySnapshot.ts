@@ -13,11 +13,11 @@ export function useRelaySnapshot(): RelaySnapshotState {
   const bootstrappedRef = useRef(false);
   const constants = useAppConstants();
 
-  const load = useEffectEvent(async () => {
+  const load = useEffectEvent(async (mode: 'initial' | 'refresh' = 'refresh') => {
     try {
       setError(null);
       const next = await getSnapshot();
-      setSnapshot(current => current ?? next);
+      setSnapshot(current => (mode === 'initial' ? (current ?? next) : next));
     } catch (reason) {
       setError(toErrorMessage(reason));
     } finally {
@@ -30,23 +30,29 @@ export function useRelaySnapshot(): RelaySnapshotState {
     let unlisten: (() => void) | undefined;
 
     void (async () => {
-      const cleanup = await listen<AppSnapshot>(constants.snapshotEvent, event => {
+      try {
+        const cleanup = await listen<AppSnapshot>(constants.snapshotEvent, event => {
+          if (!state.mounted) {
+            return;
+          }
+          setSnapshot(event.payload);
+          setIsLoading(false);
+        });
         if (!state.mounted) {
+          cleanup();
           return;
         }
-        setSnapshot(event.payload);
-        setIsLoading(false);
-      });
-      if (!state.mounted) {
-        cleanup();
-        return;
+        unlisten = cleanup;
+      } catch (reason) {
+        if (state.mounted) {
+          setError(toErrorMessage(reason));
+        }
       }
-      unlisten = cleanup;
       if (bootstrappedRef.current) {
         return;
       }
       bootstrappedRef.current = true;
-      await load();
+      await load('initial');
     })();
 
     return () => {

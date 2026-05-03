@@ -14,7 +14,7 @@ const MAX_VISIBLE = 4;
 const DIAGNOSTIC_TOAST_MS = 4200;
 const MANUAL_TOAST_MS = 3200;
 
-export function useToastCenter(diagnostics: DiagnosticsEntry[]) {
+export function useToastCenter(diagnostics: DiagnosticsEntry[] | null | undefined) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const seenRef = useRef<Set<string> | null>(null);
   const timersRef = useRef<Map<string, number>>(new Map());
@@ -60,12 +60,14 @@ export function useToastCenter(diagnostics: DiagnosticsEntry[]) {
   );
 
   useEffect(() => {
-    // Baseline with the first real snapshot of diagnostics. Until then we
-    // can't distinguish "existing on startup" from "just arrived".
+    // Baseline with the first real snapshot of diagnostics. Callers pass
+    // `null`/`undefined` until the backend snapshot is loaded, so an empty
+    // first snapshot is still a real baseline and the next diagnostic is
+    // correctly treated as new.
+    if (!diagnostics) {
+      return;
+    }
     if (seenRef.current === null) {
-      if (diagnostics.length === 0) {
-        return;
-      }
       seenRef.current = new Set(diagnostics.map(entry => entry.id));
       return;
     }

@@ -29,11 +29,16 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::OnceLock;
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 use tokio::sync::Notify;
 
 static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+const METAL_BACKEND_SETTLE: Duration = Duration::from_millis(1_000);
 
 fn drain_notify() -> &'static Notify {
     static NOTIFY: OnceLock<Notify> = OnceLock::new();
@@ -121,6 +126,20 @@ pub(crate) async fn drain() {
         waiter.await;
     }
 }
+
+/// Give ggml's macOS Metal backend a chance to finish private dispatch work
+/// that can outlive the public load/transcribe/translate call we guarded.
+/// Crash reports showed `ggml_metal_rsets_free` aborting during process exit
+/// while `__ggml_metal_rsets_init_block_invoke` was still sleeping on a
+/// libdispatch worker. `drain()` covers our Rust-visible calls; this covers
+/// ggml's backend-internal queue before libc runs C++ static destructors.
+#[cfg(target_os = "macos")]
+pub(crate) async fn settle_after_drain() {
+    tokio::time::sleep(METAL_BACKEND_SETTLE).await;
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) async fn settle_after_drain() {}
 
 #[cfg(test)]
 pub(crate) fn reset_for_tests() {
@@ -309,5 +328,14 @@ mod tests {
             let _ = Arc::new(());
         })
         .await;
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_metal_backend_settle_is_longer_than_observed_ggml_sleep() {
+        // The crash report showed ggml's private Metal resource-set init
+        // block sleeping for 500ms while process exit was already freeing
+        // Metal devices. Keep our shutdown settle above that observed window.
+        assert!(super::METAL_BACKEND_SETTLE >= Duration::from_millis(750));
     }
 }

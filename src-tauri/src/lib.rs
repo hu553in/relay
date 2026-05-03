@@ -1,4 +1,5 @@
 mod app;
+mod app_menu;
 mod audio;
 mod commands;
 mod constants;
@@ -41,8 +42,8 @@ use tauri::{AppHandle, Manager, RunEvent};
 /// * `IN_PROGRESS` — shutdown is running; further ExitRequested calls are
 ///   blocked with `prevent_exit` so a second Cmd+Q (or signal) cannot tear the
 ///   process down before pipeline teardown completes.
-/// * `DONE` — shutdown finished and explicitly called `app.exit(0)`; we let
-///   that ExitRequested through so Tauri can actually exit.
+/// * `DONE` — shutdown finished and either explicitly called `app.exit(0)` or
+///   resumed a deferred native macOS termination; we let the final exit through.
 static SHUTDOWN_STATE: AtomicU8 = AtomicU8::new(SHUTDOWN_IDLE);
 
 const SHUTDOWN_IDLE: u8 = 0;
@@ -82,16 +83,25 @@ pub fn run() {
 fn run_inner() -> Result<()> {
     app::init_logging();
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(app_menu::build);
+
+    let app = builder
         .setup(|app| {
             configure_app(app)?;
             install_signal_handler(app.handle().clone());
             Ok(())
         })
         .on_menu_event(|app, event| {
-            if let Err(error) = tray::handle_menu_event(app, event.id().0.as_str()) {
+            let menu_id = event.id().0.as_str();
+            if app_menu::handle_menu_event(app, menu_id) {
+                return;
+            }
+            if let Err(error) = tray::handle_menu_event(app, menu_id) {
                 tracing::warn!("tray menu action failed: {error:#}");
             }
         })
@@ -131,19 +141,21 @@ fn run_inner() -> Result<()> {
         ])
         .build(tauri::generate_context!())?;
 
-    app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { api, .. } = event {
-            match decide_exit(&SHUTDOWN_STATE) {
-                ExitDecision::BeginShutdown => {
-                    api.prevent_exit();
-                    spawn_graceful_shutdown(app_handle.clone());
-                }
-                ExitDecision::PreventExit => {
-                    api.prevent_exit();
-                }
-                ExitDecision::LetExit => {}
-            }
+    app.run(|app_handle, event| match event {
+        RunEvent::Ready => {
+            platform::install_native_termination_handler(app_handle);
         }
+        RunEvent::ExitRequested { api, .. } => match decide_exit(&SHUTDOWN_STATE) {
+            ExitDecision::BeginShutdown => {
+                api.prevent_exit();
+                spawn_graceful_shutdown(app_handle.clone());
+            }
+            ExitDecision::PreventExit => {
+                api.prevent_exit();
+            }
+            ExitDecision::LetExit => {}
+        },
+        _ => {}
     });
 
     Ok(())
@@ -173,10 +185,15 @@ fn spawn_graceful_shutdown(app: AppHandle) {
         // returns only after every such call has finished — no matter which
         // task spawned it.
         ggml::drain().await;
+        ggml::settle_after_drain().await;
 
-        // Order matters: flip to DONE before `app.exit(0)` so the ExitRequested
-        // we trigger ourselves observes DONE and lets Tauri actually exit.
+        // Order matters: flip to DONE before the final exit continuation, so
+        // the ExitRequested we trigger ourselves observes DONE and lets Tauri
+        // actually exit.
         SHUTDOWN_STATE.store(SHUTDOWN_DONE, Ordering::Release);
+        if platform::finish_native_termination(&app) {
+            return;
+        }
         app.exit(0);
     });
 }
@@ -184,7 +201,7 @@ fn spawn_graceful_shutdown(app: AppHandle) {
 /// Installs a single async task that converts terminate-style OS signals
 /// (SIGTERM/SIGINT/SIGHUP on unix; Ctrl+C/Ctrl+Break/Close/Logoff/Shutdown on
 /// Windows) into a Tauri ExitRequested, which then drives the same graceful
-/// shutdown path as Cmd+Q or the tray Quit menu.
+/// shutdown path as Cmd+Q, Dock Quit, or the tray Quit menu.
 ///
 /// SIGKILL and Force Quit cannot be intercepted by definition.
 fn install_signal_handler(app: AppHandle) {
@@ -240,6 +257,7 @@ async fn wait_for_terminate_signal() -> Result<()> {
 
 fn configure_app(app: &mut tauri::App) -> Result<()> {
     platform::configure_app_policy(app);
+    platform::install_native_termination_handler(app.handle());
 
     let relay = RelayApp::bootstrap(app.handle().clone())?;
     app.manage(relay.clone());

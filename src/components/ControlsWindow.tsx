@@ -51,7 +51,7 @@ import type {
 export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
   const snapshot = relay.snapshot;
   const [actionError, setActionError] = useState<string | null>(null);
-  const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics ?? []);
+  const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics);
   const [showStats, setShowStats] = useState(false);
   const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
 

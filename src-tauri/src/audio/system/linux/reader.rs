@@ -57,7 +57,10 @@ pub(super) fn read_capture_stdout(
                     sample_rate: SAMPLE_RATE,
                     samples,
                 };
-                let _ = tx.blocking_send(chunk);
+                // Match the cpal input path: audio capture must never block on
+                // a full processing queue. Dropping an overrun chunk is safer
+                // than pinning this reader thread and delaying process stop.
+                let _ = tx.try_send(chunk);
             }
             Err(error) => {
                 on_error(
@@ -82,9 +85,11 @@ fn f32le_bytes_to_mono(bytes: &[u8], channels: usize) -> Vec<f32> {
 mod tests {
     use std::io::{self, Cursor, Read};
     use std::sync::{atomic::AtomicBool, Arc, Mutex};
+    use std::time::Duration;
 
     use tokio::sync::mpsc;
 
+    use crate::audio::RawAudioChunk;
     use crate::domain::InputSource;
 
     use super::{f32le_bytes_to_mono, read_capture_stdout, SAMPLE_RATE};
@@ -156,6 +161,39 @@ mod tests {
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].0, InputSource::SystemAudio);
         assert!(errors[0].1.contains("reader failed"));
+    }
+
+    #[test]
+    fn reader_drops_chunks_when_audio_queue_is_full() {
+        let samples = [-1.0_f32, 1.0, 0.25, 0.75];
+        let bytes = samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect::<Vec<_>>();
+        let (tx, _rx) = mpsc::channel(1);
+        tx.blocking_send(RawAudioChunk {
+            source: InputSource::SystemAudio,
+            captured_at_ms: 0,
+            sample_rate: SAMPLE_RATE,
+            samples: Vec::new(),
+        })
+        .expect("prefill audio queue");
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+
+        std::thread::spawn(move || {
+            read_capture_stdout(
+                Cursor::new(bytes),
+                tx,
+                Arc::new(|_, _| {}),
+                Arc::new(AtomicBool::new(true)),
+            );
+            let _ = done_tx.send(());
+        });
+
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(1)).is_ok(),
+            "reader must not block when downstream audio queue is full"
+        );
     }
 
     #[test]

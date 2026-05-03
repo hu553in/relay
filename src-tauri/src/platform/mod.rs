@@ -19,6 +19,28 @@ pub(crate) fn configure_app_policy(app: &mut tauri::App) {
     }
 }
 
+pub(crate) fn install_native_termination_handler(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        macos::install_native_termination_handler(app)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::install_native_termination_handler(app)
+    }
+}
+
+pub(crate) fn finish_native_termination(app: &AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::finish_native_termination(app)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        default::finish_native_termination(app)
+    }
+}
+
 pub(crate) fn apply_main_window_platform_behavior<'a>(
     builder: WindowBuilder<'a>,
 ) -> WindowBuilder<'a> {

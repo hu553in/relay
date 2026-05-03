@@ -1,10 +1,3 @@
-import {
-  Combobox,
-  ComboboxButton,
-  ComboboxInput,
-  ComboboxOption,
-  ComboboxOptions,
-} from '@headlessui/react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -12,10 +5,8 @@ import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   AudioLines,
   Captions,
-  Check,
-  ChevronDown,
   ChevronRight,
-  Download,
+  ContactRound,
   ExternalLink,
   FileCode2,
   FileSearchCorner,
@@ -31,10 +22,11 @@ import { type PropsWithChildren, type ReactNode, useEffect, useId, useMemo, useS
 
 import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { type LogEntry, SegmentLogPanel } from '@/components/SegmentLogPanel';
+import { LanguageCombobox } from '@/components/settings/LanguageCombobox';
 import { IntegerSettingField, MaxTokensField } from '@/components/settings/MaxTokensField';
+import { compareModelRecords, ModelsList } from '@/components/settings/ModelsList';
 import { PathInputField } from '@/components/settings/PathInputField';
 import { ShortcutInputField } from '@/components/settings/ShortcutInputField';
-import { Badge } from '@/components/shared/Badge';
 import { HealthBadge } from '@/components/shared/HealthBadge';
 import { ClearLogButton, IconButton } from '@/components/shared/IconButton';
 import { Switch } from '@/components/shared/Switch';
@@ -44,7 +36,6 @@ import { useAppConstants } from '@/hooks/useAppConstants';
 import { useToastCenter } from '@/hooks/useToastCenter';
 import { diagnosticLevelTone } from '@/lib/diagnostics';
 import { toErrorMessage } from '@/lib/errors';
-import { formatModelSize } from '@/lib/format';
 import {
   clearDiagnostics,
   downloadRecommendedModel,
@@ -56,7 +47,6 @@ import type {
   AppPaths,
   ModelKind,
   ModelRecord,
-  ModelState,
   RelaySettings,
   RelaySnapshotState,
   ServiceHealth,
@@ -71,41 +61,6 @@ type SettingsSection =
   | 'logs'
   | 'rawConfig'
   | 'about';
-
-const LANGUAGE_NAMES: Record<string, string> = {
-  en: 'English',
-  de: 'Deutsch',
-  es: 'Español',
-  fr: 'Français',
-  it: 'Italiano',
-  ja: '日本語',
-  ko: '한국어',
-  nl: 'Nederlands',
-  pl: 'Polski',
-  pt: 'Português',
-  ru: 'Русский',
-  tr: 'Türkçe',
-  uk: 'Українська',
-  zh: '中文',
-};
-
-// Explicit order instead of relying on `Object.keys` insertion order.
-const COMMON_LANGUAGES = [
-  'en',
-  'de',
-  'es',
-  'fr',
-  'it',
-  'ja',
-  'ko',
-  'nl',
-  'pl',
-  'pt',
-  'ru',
-  'tr',
-  'uk',
-  'zh',
-];
 
 interface SectionDescriptor {
   id: SettingsSection;
@@ -164,27 +119,6 @@ const SECTION_BY_ID: Record<SettingsSection, SectionDescriptor> = Object.fromEnt
   SECTION_ITEMS.map(item => [item.id, item])
 ) as Record<SettingsSection, SectionDescriptor>;
 
-const MODEL_STATE_LABELS: Record<ModelState, string> = {
-  active: 'Active',
-  available: 'Available',
-  missing: 'Missing',
-};
-
-const MODEL_STATE_ORDER: Record<ModelState, number> = {
-  active: 0,
-  available: 1,
-  missing: 2,
-};
-
-function compareModelRecords(left: ModelRecord, right: ModelRecord) {
-  if (left.recommended !== right.recommended) {
-    return left.recommended ? -1 : 1;
-  }
-  const stateDelta = MODEL_STATE_ORDER[left.state] - MODEL_STATE_ORDER[right.state];
-  if (stateDelta !== 0) return stateDelta;
-  return left.relativePath.localeCompare(right.relativePath);
-}
-
 export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const snapshot = relay.snapshot;
   const [activeSection, setActiveSection] = useState<SettingsSection>('inputs');
@@ -193,7 +127,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const [appPaths, setAppPaths] = useState<AppPaths | null>(null);
   const [downloadingModelKind, setDownloadingModelKind] = useState<ModelKind | null>(null);
   const constants = useAppConstants();
-  const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics ?? []);
+  const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics);
 
   useEffect(() => {
     let mounted = true;
@@ -795,6 +729,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   onClick={() => {
                     void openUrl('mailto:r.m.khasanshin@gmail.com');
                   }}
+                  icon={<ContactRound size={14} />}
                 />
                 <LabeledInfoRow
                   label='Website'
@@ -889,98 +824,6 @@ function Field({ label, hint, children }: PropsWithChildren<{ label: string; hin
   );
 }
 
-function LanguageCombobox({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-}) {
-  const [query, setQuery] = useState('');
-
-  const trimmedQuery = query.trim();
-  const needle = trimmedQuery.toLowerCase();
-
-  const filtered = !needle
-    ? COMMON_LANGUAGES
-    : COMMON_LANGUAGES.filter(code => {
-        const name = LANGUAGE_NAMES[code] ?? code;
-        return code.includes(needle) || name.toLowerCase().includes(needle);
-      });
-
-  const showCreate = trimmedQuery.length > 0 && !COMMON_LANGUAGES.includes(needle);
-
-  const displayValue = (code: string) => {
-    if (!code) return '';
-    const name = LANGUAGE_NAMES[code];
-    return name ? `${code.toUpperCase()} · ${name}` : code;
-  };
-
-  return (
-    <Combobox
-      value={value}
-      onChange={(next: string | null) => {
-        if (next !== null) onChange(next);
-      }}
-      onClose={() => {
-        setQuery('');
-      }}
-    >
-      <div className='relative'>
-        <ComboboxInput
-          aria-label='Target language'
-          className='w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 pr-8 text-[12px] text-white outline-none transition placeholder:text-stone-500 focus:border-stone-300/45'
-          displayValue={displayValue}
-          onChange={event => {
-            setQuery(event.target.value);
-          }}
-          placeholder='Search or type custom code'
-        />
-        <ComboboxButton className='absolute inset-y-0 right-2 grid place-items-center text-stone-400 transition hover:text-stone-200'>
-          <ChevronDown size={16} />
-        </ComboboxButton>
-        <ComboboxOptions
-          anchor='bottom start'
-          className='relay-scroll z-20 mt-1 max-h-72 w-(--input-width) overflow-y-auto rounded-xl border border-white/10 bg-[rgba(24,24,22,0.96)] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.4)] backdrop-blur-2xl empty:hidden'
-        >
-          {filtered.map(code => (
-            <ComboboxOption
-              key={code}
-              value={code}
-              className='group flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-[13px] text-stone-200 transition data-focus:bg-white/10 data-selected:text-stone-100'
-            >
-              <span className='flex items-center gap-2.5'>
-                <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-(--relay-tracking-wide) text-stone-400 group-data-selected:text-stone-300'>
-                  {code.toUpperCase()}
-                </span>
-                <span>{LANGUAGE_NAMES[code] ?? code}</span>
-              </span>
-              <Check
-                size={14}
-                className='text-stone-300 opacity-0 group-data-selected:opacity-100'
-              />
-            </ComboboxOption>
-          ))}
-          {showCreate ? (
-            <ComboboxOption
-              value={trimmedQuery}
-              className='group mt-1 flex cursor-pointer items-center gap-2.5 rounded-lg border border-dashed border-white/10 px-2.5 py-2 text-[13px] text-stone-300 transition data-focus:border-stone-300/40 data-focus:bg-white/9'
-            >
-              <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-(--relay-tracking-wide) text-stone-300'>
-                {trimmedQuery.slice(0, 3).toUpperCase()}
-              </span>
-              <span>
-                Use custom language &quot;
-                <span className='text-stone-200'>{trimmedQuery}</span>&quot;
-              </span>
-            </ComboboxOption>
-          ) : null}
-        </ComboboxOptions>
-      </div>
-    </Combobox>
-  );
-}
-
 function ToggleRow({
   label,
   detail,
@@ -999,77 +842,6 @@ function ToggleRow({
         <span className='text-[12px] leading-5 text-stone-400'>{detail}</span>
       </div>
       <Switch checked={checked} onChange={onChange} />
-    </div>
-  );
-}
-
-function ModelsList({
-  kind,
-  models,
-  onUse,
-  onDownload,
-  downloading,
-}: {
-  kind: ModelKind;
-  models: ModelRecord[];
-  onUse: (kind: ModelKind, model: ModelRecord) => Promise<void>;
-  onDownload: (kind: ModelKind) => Promise<void>;
-  downloading: boolean;
-}) {
-  if (models.length === 0) {
-    return (
-      <EmptyState text='No local models discovered yet. Point Relay at a models directory first.' />
-    );
-  }
-
-  return (
-    <div className='grid gap-2'>
-      {models.map(model => (
-        <article
-          key={`${kind}-${model.path}`}
-          className='rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 transition hover:border-white/12 hover:bg-white/7'
-        >
-          <div className='flex items-start justify-between gap-3'>
-            <div className='min-w-0'>
-              <p className='truncate text-[12.5px] font-medium text-white'>
-                {model.relativePath || model.name}
-              </p>
-              <p className='mt-1 break-all text-[11.5px] text-stone-400'>{model.path}</p>
-            </div>
-            <div className='flex shrink-0 items-center gap-1.5'>
-              {model.recommended ? (
-                <Badge tone='warning' className='text-[10px]'>
-                  Recommended
-                </Badge>
-              ) : null}
-              <ModelStateBadge state={model.state} />
-            </div>
-          </div>
-          <div className='mt-2 flex items-center justify-between gap-3'>
-            <span className='text-[10.5px] text-stone-500'>{formatModelSize(model.sizeBytes)}</span>
-            {model.state !== 'active' && model.recommended && model.state === 'missing' ? (
-              <button
-                type='button'
-                onClick={() => void onDownload(kind)}
-                disabled={downloading}
-                className='inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/4 px-3 py-1.5 text-[12px] font-medium text-stone-100 transition hover:border-white/14 hover:bg-white/10 disabled:opacity-45'
-              >
-                <Download size={13} />
-                {downloading ? 'Downloading...' : 'Download model'}
-              </button>
-            ) : model.state !== 'active' ? (
-              <button
-                type='button'
-                onClick={() => void onUse(kind, model)}
-                disabled={model.state === 'missing'}
-                className='rounded-lg border border-white/10 bg-white/4 px-3 py-1.5 text-[12px] font-medium text-stone-100 transition hover:border-white/14 hover:bg-white/10 disabled:opacity-40'
-              >
-                Use model
-              </button>
-            ) : null}
-          </div>
-        </article>
-      ))}
     </div>
   );
 }
@@ -1176,14 +948,6 @@ function InlineNote({ children }: PropsWithChildren) {
   );
 }
 
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className='rounded-xl border border-transparent bg-transparent px-4 py-6 text-center text-[12px] leading-5 text-stone-500'>
-      {text}
-    </div>
-  );
-}
-
 function TomlPreview({ content }: { content: string }) {
   return (
     <pre className='relay-scroll max-h-120 overflow-auto rounded-xl border border-white/8 bg-black/24 px-3.5 py-3 font-mono text-[11.5px] leading-5 text-stone-300'>
@@ -1222,14 +986,5 @@ function renderTomlLine(line: string) {
       <span className='text-stone-500'>=</span>
       <span className='text-stone-300'>{value}</span>
     </>
-  );
-}
-
-function ModelStateBadge({ state }: { state: ModelRecord['state'] }) {
-  const tone = state === 'active' ? 'success' : state === 'missing' ? 'danger' : 'neutral';
-  return (
-    <Badge tone={tone} className='text-[10px]'>
-      {MODEL_STATE_LABELS[state]}
-    </Badge>
   );
 }

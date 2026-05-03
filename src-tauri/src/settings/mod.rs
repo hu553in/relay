@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -392,10 +392,18 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // is also explicit enough that a leftover from a crash is recognizable.
     let temp_path = parent.join(format!("{file_name}.tmp.{}", uuid::Uuid::new_v4()));
 
-    if let Err(error) = fs::write(&temp_path, bytes) {
+    let mut file = match fs::File::create(&temp_path) {
+        Ok(file) => file,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+    };
+    if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
         let _ = fs::remove_file(&temp_path);
         return Err(error);
     }
+    drop(file);
     if let Err(error) = fs::rename(&temp_path, path) {
         let _ = fs::remove_file(&temp_path);
         return Err(error);

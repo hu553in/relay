@@ -132,7 +132,7 @@ microphone = true
 system_audio = false
 
 [transcription]
-models_dir = "/Users/Application Support/Relay/models"
+models_dir = "/Users/you/Library/Application Support/Relay/models"
 model_file = "ggml-small.bin"
 threads = 4
 window_seconds = 4
@@ -140,7 +140,7 @@ hop_seconds = 2
 sentence_timeout_ms = 9000
 
 [translation]
-models_dir = "/Users/Application Support/Relay/models"
+models_dir = "/Users/you/Library/Application Support/Relay/models"
 model_file = "Qwen2.5-3B-Instruct-Q5_K_M.gguf"
 target_language = "en"
 max_tokens = 96
@@ -278,7 +278,7 @@ default output device is present and the OS/runtime exposes loopback capture for
 
 ### Logs do not appear
 
-Open Settings -> Logs. Use the reveal action to show `diagnostics.log` in Finder.
+Open Settings -> Logs. Use the reveal action to show `diagnostics.log` in the system file manager.
 
 ## Release
 

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -33,6 +33,23 @@ describe('useCommittableDraft', () => {
 
     await user.tab();
     expect(onCommit).toHaveBeenCalledWith(42);
+  });
+
+  it('syncs external value changes while the field is not being edited', async () => {
+    const onCommit = vi.fn();
+    const view = render(<DraftHarness value={10} onCommit={onCommit} />);
+
+    const input = screen.getByLabelText('Draft value');
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error('expected draft field to be an input');
+    }
+
+    view.rerender(<DraftHarness value={12} onCommit={onCommit} />);
+
+    await waitFor(() => {
+      expect(input.value).toBe('12');
+    });
+    expect(onCommit).not.toHaveBeenCalled();
   });
 
   it('flushes the latest draft when unmounted while focused', async () => {

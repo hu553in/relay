@@ -146,9 +146,9 @@ pub(crate) fn handle_menu_event(app: &AppHandle, menu_id: &str) -> Result<()> {
         ids::tray::SETTINGS => relay.show_settings(),
         ids::tray::ABOUT => relay.show_settings_section("about"),
         ids::tray::QUIT => {
-            // Routed through RunEvent::ExitRequested in lib.rs so the same
-            // graceful shutdown runs for tray Quit, Cmd+Q, Apple menu Quit,
-            // dock right-click Quit, and OS logout/shutdown.
+            // Routed through RunEvent::ExitRequested in lib.rs so tray Quit
+            // shares the same graceful shutdown path as app-menu Quit, Dock
+            // Quit, and OS signals.
             app.exit(0);
             Ok(())
         }

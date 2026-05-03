@@ -31,11 +31,6 @@ export function useCommittableDraft<TValue>({
   const [focused, setFocused] = useState(false);
   const [lastSeen, setLastSeen] = useState<TValue>(value);
 
-  if (!focused && value !== lastSeen) {
-    setLastSeen(value);
-    setDraft(toDraft(value));
-  }
-
   const draftRef = useRef(draft);
   const valueRef = useRef(value);
   const commitRef = useRef(commit);
@@ -44,6 +39,14 @@ export function useCommittableDraft<TValue>({
   valueRef.current = value;
   commitRef.current = commit;
   fromDraftRef.current = fromDraft;
+
+  useEffect(() => {
+    if (focused || value === lastSeen) {
+      return;
+    }
+    setLastSeen(value);
+    setDraft(toDraft(value));
+  }, [focused, lastSeen, toDraft, value]);
 
   useEffect(
     () => () => {

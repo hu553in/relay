@@ -23,7 +23,7 @@ export function formatTime(timestampMs: number): string {
 }
 
 export function formatPercent(value: number | null | undefined, fallback = 'Unavailable'): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
   }
   return `${value.toFixed(0)}%`;
@@ -38,7 +38,7 @@ export function formatByteSize(
   value: number | null | undefined,
   { fallback, detail }: ByteFormatOptions
 ): string {
-  if (typeof value !== 'number' || value <= 0) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return fallback;
   }
   if (detail === 'detailed' && value < 1024 * 1024) {
@@ -59,7 +59,13 @@ export function formatMemoryPair(
   used: number | null | undefined,
   total: number | null | undefined
 ): string {
-  if (typeof used !== 'number' || typeof total !== 'number' || total <= 0) {
+  if (
+    typeof used !== 'number' ||
+    typeof total !== 'number' ||
+    !Number.isFinite(used) ||
+    !Number.isFinite(total) ||
+    total <= 0
+  ) {
     return 'Unavailable';
   }
   return `${formatMemoryCompact(used)} / ${formatMemoryCompact(total)}`;
@@ -83,7 +89,11 @@ export function listeningStateLabel(state: ListeningState): string {
 }
 
 export function formatRelayCpu(metrics: SystemMetrics | null): string {
-  if (!metrics || typeof metrics.processCpuUsage !== 'number') {
+  if (
+    !metrics ||
+    typeof metrics.processCpuUsage !== 'number' ||
+    !Number.isFinite(metrics.processCpuUsage)
+  ) {
     return 'Unavailable';
   }
   const divisor = Math.max(1, metrics.cpuLogicalCores);
