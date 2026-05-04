@@ -4,7 +4,7 @@ use cpal::Stream;
 use tokio::sync::mpsc;
 
 use crate::audio::{build_stream, RawAudioChunk};
-use crate::domain::{InputSource, SourceCapability};
+use crate::domain::{InputSource, SourceCapability, UserMessage};
 
 use super::{AudioErrorCallback, SystemAudioBackend};
 
@@ -28,8 +28,8 @@ impl SystemAudioBackend for SystemAudioInputHandle {
         Ok(Self { _stream: stream })
     }
 
-    fn detail(&self) -> &'static str {
-        "Active on the default output device loopback"
+    fn detail(&self) -> UserMessage {
+        UserMessage::new("source:activeDefaultOutputLoopback")
     }
 }
 
@@ -41,7 +41,7 @@ impl SystemAudioInputHandle {
         <Self as SystemAudioBackend>::start(tx, on_error)
     }
 
-    pub(crate) fn detail(&self) -> &'static str {
+    pub(crate) fn detail(&self) -> UserMessage {
         <Self as SystemAudioBackend>::detail(self)
     }
 }
@@ -49,15 +49,13 @@ impl SystemAudioInputHandle {
 pub(crate) fn capability() -> SourceCapability {
     let host = cpal::default_host();
     let Some(device) = host.default_output_device() else {
-        return SourceCapability::unavailable(
-            "System audio capture needs a default output device with loopback support",
-        );
+        return SourceCapability::unavailable(UserMessage::new("source:systemAudioNeedsLoopback"));
     };
 
     match device.default_output_config() {
-        Ok(_) => SourceCapability::available("Ready to capture the default output device loopback"),
-        Err(error) => {
-            SourceCapability::unavailable(format!("Default output device is unavailable: {error}"))
-        }
+        Ok(_) => SourceCapability::available(UserMessage::new("source:readyDefaultOutputLoopback")),
+        Err(error) => SourceCapability::unavailable(
+            UserMessage::new("source:defaultOutputDeviceUnavailable").param("error", error),
+        ),
     }
 }

@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import type { ToastItem } from '@/hooks/useToastCenter';
 
 export function ToastViewport({
@@ -7,6 +9,8 @@ export function ToastViewport({
   toasts: ToastItem[];
   onDismiss: (id: string) => void;
 }) {
+  const { t } = useTranslation('common');
+
   if (toasts.length === 0) {
     return null;
   }
@@ -44,7 +48,7 @@ export function ToastViewport({
               onClick={() => {
                 onDismiss(toast.id);
               }}
-              aria-label='Dismiss'
+              aria-label={t('dismiss')}
               className='rounded-lg border border-white/10 px-2 py-0.5 text-[11px] text-stone-300 transition hover:border-white/14 hover:bg-white/12 hover:text-white'
             >
               <span aria-hidden='true'>×</span>

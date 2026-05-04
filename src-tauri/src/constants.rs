@@ -69,6 +69,10 @@ pub const MAX_TRANSCRIPTION_SENTENCE_TIMEOUT_MS: u32 = 30_000;
 /// `LanguageCombobox` shows the human label.
 pub const DEFAULT_TARGET_LANGUAGE: &str = "en";
 
+/// Default language for the webview UI. Frontend language packs live under
+/// `src/i18n/locales`; missing keys always fall back to this pack.
+pub const DEFAULT_UI_LANGUAGE: &str = "en";
+
 /// Default global shortcut that toggles listening on/off. Cross-platform
 /// `CmdOrCtrl` resolves to ⌘ on macOS and Ctrl elsewhere.
 pub const DEFAULT_TOGGLE_LISTENING_SHORTCUT: &str = "CmdOrCtrl+Shift+L";
@@ -149,6 +153,7 @@ pub struct AppConstants {
     pub min_transcription_sentence_timeout_ms: u32,
     pub max_transcription_sentence_timeout_ms: u32,
     pub default_target_language: String,
+    pub default_ui_language: String,
     pub default_toggle_listening_shortcut: String,
     pub default_toggle_overlay_shortcut: String,
     pub max_model_walk_depth: u32,
@@ -185,6 +190,7 @@ pub fn app_constants() -> AppConstants {
         min_transcription_sentence_timeout_ms: MIN_TRANSCRIPTION_SENTENCE_TIMEOUT_MS,
         max_transcription_sentence_timeout_ms: MAX_TRANSCRIPTION_SENTENCE_TIMEOUT_MS,
         default_target_language: DEFAULT_TARGET_LANGUAGE.to_string(),
+        default_ui_language: DEFAULT_UI_LANGUAGE.to_string(),
         default_toggle_listening_shortcut: DEFAULT_TOGGLE_LISTENING_SHORTCUT.to_string(),
         default_toggle_overlay_shortcut: DEFAULT_TOGGLE_OVERLAY_SHORTCUT.to_string(),
         max_model_walk_depth: MAX_MODEL_WALK_DEPTH as u32,
@@ -329,6 +335,7 @@ mod tests {
             MAX_TRANSCRIPTION_SENTENCE_TIMEOUT_MS
         );
         assert_eq!(constants.default_target_language, DEFAULT_TARGET_LANGUAGE);
+        assert_eq!(constants.default_ui_language, DEFAULT_UI_LANGUAGE);
         assert_eq!(
             constants.default_toggle_listening_shortcut,
             DEFAULT_TOGGLE_LISTENING_SHORTCUT
@@ -386,6 +393,7 @@ mod tests {
             "\"minTranscriptionSentenceTimeoutMs\"",
             "\"maxTranscriptionSentenceTimeoutMs\"",
             "\"defaultTargetLanguage\"",
+            "\"defaultUiLanguage\"",
             "\"defaultToggleListeningShortcut\"",
             "\"defaultToggleOverlayShortcut\"",
             "\"maxModelWalkDepth\"",

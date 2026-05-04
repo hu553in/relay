@@ -6,7 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::domain::SourceCapability;
+use crate::domain::{SourceCapability, UserMessage};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Backend {
@@ -18,7 +18,7 @@ pub(super) enum Backend {
 pub(super) struct CaptureCommand {
     program: &'static str,
     args: &'static [&'static str],
-    detail: &'static str,
+    detail_code: &'static str,
 }
 
 impl CaptureCommand {
@@ -38,7 +38,7 @@ impl CaptureCommand {
                     "{ stream.capture.sink=true }",
                     "-",
                 ],
-                detail: "Active through PipeWire sink capture",
+                detail_code: "source:activePipeWire",
             },
             Backend::PulseAudio => Self {
                 program: "parec",
@@ -53,7 +53,7 @@ impl CaptureCommand {
                     "--device",
                     "@DEFAULT_MONITOR@",
                 ],
-                detail: "Active through PulseAudio default monitor",
+                detail_code: "source:activePulseAudio",
             },
         }
     }
@@ -62,8 +62,8 @@ impl CaptureCommand {
         self.program
     }
 
-    pub(super) fn detail(&self) -> &'static str {
-        self.detail
+    pub(super) fn detail(&self) -> UserMessage {
+        UserMessage::new(self.detail_code)
     }
 
     pub(super) fn command(&self, program_path: PathBuf) -> Command {
@@ -86,18 +86,14 @@ fn capability_for_path(path: Option<OsString>) -> SourceCapability {
     let has_pipewire = command_path_with_path("pw-record", path.as_ref()).is_some();
     let has_pulse = command_path_with_path("parec", path.as_ref()).is_some();
     match (has_pipewire, has_pulse) {
-        (true, true) => SourceCapability::available(
-            "Ready to capture system audio through PipeWire, with PulseAudio monitor fallback",
-        ),
-        (true, false) => SourceCapability::available(
-            "Ready to capture system audio through PipeWire sink capture",
-        ),
-        (false, true) => SourceCapability::available(
-            "Ready to capture system audio through the PulseAudio default monitor",
-        ),
-        (false, false) => SourceCapability::unavailable(
-            "Install an executable pw-record or parec runtime tool to capture system audio",
-        ),
+        (true, true) => {
+            SourceCapability::available(UserMessage::new("source:readyPipeWireWithPulseFallback"))
+        }
+        (true, false) => SourceCapability::available(UserMessage::new("source:readyPipeWire")),
+        (false, true) => SourceCapability::available(UserMessage::new("source:readyPulseAudio")),
+        (false, false) => {
+            SourceCapability::unavailable(UserMessage::new("source:installLinuxCaptureTool"))
+        }
     }
 }
 
@@ -190,7 +186,7 @@ mod tests {
         let capability = capability_for_path(Some(temp.into_os_string()));
 
         assert!(capability.available);
-        assert!(capability.detail.contains("PipeWire"));
+        assert_eq!(capability.detail.code, "source:readyPipeWire");
     }
 
     #[test]
@@ -201,7 +197,7 @@ mod tests {
         let capability = capability_for_path(Some(temp.into_os_string()));
 
         assert!(capability.available);
-        assert!(capability.detail.contains("PulseAudio"));
+        assert_eq!(capability.detail.code, "source:readyPulseAudio");
     }
 
     #[test]
@@ -211,7 +207,7 @@ mod tests {
         let capability = capability_for_path(Some(temp.into_os_string()));
 
         assert!(!capability.available);
-        assert!(capability.detail.contains("pw-record"));
+        assert_eq!(capability.detail.code, "source:installLinuxCaptureTool");
     }
 
     #[test]

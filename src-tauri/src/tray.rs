@@ -27,15 +27,15 @@ struct TrayMenuFlags {
 }
 
 pub(crate) fn configure(app: &AppHandle) -> Result<()> {
-    let start = menu_item(app, ids::tray::START, "Start Listening")?;
-    let stop = menu_item(app, ids::tray::STOP, "Stop Listening")?;
-    let show_overlay = menu_item(app, ids::tray::SHOW_OVERLAY, "Show Overlay")?;
-    let hide_overlay = menu_item(app, ids::tray::HIDE_OVERLAY, "Hide Overlay")?;
+    let start = menu_item(app, ids::tray::START, "Start listening")?;
+    let stop = menu_item(app, ids::tray::STOP, "Stop listening")?;
+    let show_overlay = menu_item(app, ids::tray::SHOW_OVERLAY, "Show overlay")?;
+    let hide_overlay = menu_item(app, ids::tray::HIDE_OVERLAY, "Hide overlay")?;
     let controls = menu_item(app, ids::tray::CONTROLS, "Controls")?;
     let settings = menu_item(app, ids::tray::SETTINGS, "Settings")?;
     let about = menu_item(app, ids::tray::ABOUT, "About")?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit = menu_item(app, ids::tray::QUIT, "Quit")?;
+    let quit = menu_item(app, ids::tray::QUIT, "Quit Relay")?;
 
     let menu = Menu::with_items(
         app,

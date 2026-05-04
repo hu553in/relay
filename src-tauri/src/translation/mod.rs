@@ -18,14 +18,14 @@ use crate::constants::{
     MIN_GENERATION_TOKENS, MIN_TRANSLATION_CONTEXT_TOKENS, MIN_WORKER_THREADS,
     TRANSLATION_MODEL_EXTENSIONS,
 };
-use crate::domain::{ServiceHealth, TranslationSettings};
+use crate::domain::{ServiceHealth, TranslationSettings, UserMessage};
 use crate::ggml;
 use crate::models::validate_model_file_extension;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TranslationHealthReport {
     pub(crate) health: ServiceHealth,
-    pub(crate) detail: String,
+    pub(crate) detail: UserMessage,
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +57,8 @@ impl TranslationProvider {
             Ok(report) => report,
             Err(error) => TranslationHealthReport {
                 health: ServiceHealth::Unavailable,
-                detail: format!("llama.cpp health worker failed: {error}"),
+                detail: UserMessage::new("runtime:llamaHealthWorkerFailed")
+                    .param("error", format!("{error:#}")),
             },
         }
     }
@@ -106,7 +107,7 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
     if settings.model_path.trim().is_empty() {
         return TranslationHealthReport {
             health: ServiceHealth::Unavailable,
-            detail: "Translation model directory is empty".to_string(),
+            detail: UserMessage::new("runtime:modelDirectoryEmpty").param("label", "Translation"),
         };
     }
 
@@ -114,22 +115,22 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
     if !path.exists() {
         return TranslationHealthReport {
             health: ServiceHealth::Unavailable,
-            detail: format!(
-                "Translation model directory is missing at {}",
-                path.display()
-            ),
+            detail: UserMessage::new("runtime:modelDirectoryMissing")
+                .param("label", "Translation")
+                .param("path", path.display()),
         };
     }
     if !path.is_dir() {
         return TranslationHealthReport {
             health: ServiceHealth::Unavailable,
-            detail: "Translation model directory must point to a folder".to_string(),
+            detail: UserMessage::new("runtime:modelDirectoryMustBeFolder")
+                .param("label", "Translation"),
         };
     }
     if settings.selected_model_path().is_none() {
         return TranslationHealthReport {
             health: ServiceHealth::Unavailable,
-            detail: "Choose a GGUF translation model from the configured directory.".to_string(),
+            detail: UserMessage::new("runtime:chooseTranslationModel"),
         };
     }
 
@@ -140,7 +141,7 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
     let Some(_ggml_guard) = ggml::try_enter() else {
         return TranslationHealthReport {
             health: ServiceHealth::Unavailable,
-            detail: "Translation runtime is shutting down".to_string(),
+            detail: UserMessage::new("runtime:translationRuntimeShuttingDown"),
         };
     };
 
@@ -149,13 +150,13 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
         Err(TryLockError::WouldBlock) => {
             return TranslationHealthReport {
                 health: ServiceHealth::Degraded,
-                detail: "Translation runtime is busy finishing a previous generation".to_string(),
+                detail: UserMessage::new("runtime:translationRuntimeBusy"),
             };
         }
         Err(TryLockError::Poisoned(_)) => {
             return TranslationHealthReport {
                 health: ServiceHealth::Unavailable,
-                detail: "llama.cpp runtime lock poisoned".to_string(),
+                detail: UserMessage::new("runtime:llamaRuntimeLockPoisoned"),
             };
         }
     };
@@ -164,11 +165,12 @@ fn check_settings_blocking(settings: &TranslationSettings) -> TranslationHealthR
     match runtime.ensure_loaded(settings) {
         Ok(runtime) => TranslationHealthReport {
             health: ServiceHealth::Ready,
-            detail: format!("Loaded local translation model {}", runtime.model_path),
+            detail: UserMessage::new("runtime:modelPath").param("path", runtime.model_path),
         },
         Err(error) => TranslationHealthReport {
             health: ServiceHealth::Degraded,
-            detail: format!("Failed to load local translation model: {error}"),
+            detail: UserMessage::new("runtime:translationModelLoadFailed")
+                .param("error", format!("{error:#}")),
         },
     }
 }
@@ -433,7 +435,7 @@ mod tests {
         let report = check_settings_blocking(&settings);
 
         assert_eq!(report.health, ServiceHealth::Degraded);
-        assert!(report.detail.contains("busy"));
+        assert_eq!(report.detail.code, "runtime:translationRuntimeBusy");
 
         fs::remove_dir_all(root).ok();
     }
@@ -488,7 +490,7 @@ mod tests {
         let report = check_settings_blocking(&settings);
 
         assert_eq!(report.health, ServiceHealth::Unavailable);
-        assert!(report.detail.contains("Choose a GGUF translation model"));
+        assert_eq!(report.detail.code, "runtime:chooseTranslationModel");
 
         fs::remove_dir_all(root).ok();
     }
@@ -511,7 +513,7 @@ mod tests {
 
         let report = check_settings_blocking(&settings);
         assert_eq!(report.health, ServiceHealth::Unavailable);
-        assert!(report.detail.to_lowercase().contains("shutting down"));
+        assert_eq!(report.detail.code, "runtime:translationRuntimeShuttingDown");
 
         let result = translate_blocking(
             settings,

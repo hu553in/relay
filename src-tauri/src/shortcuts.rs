@@ -12,7 +12,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 #[cfg(desktop)]
 use crate::app::RelayApp;
 use crate::constants::DEFAULT_TOGGLE_LISTENING_SHORTCUT;
-use crate::domain::ShortcutSettings;
+use crate::domain::{ShortcutSettings, UserMessage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShortcutAction {
@@ -24,10 +24,10 @@ enum ShortcutAction {
 struct ResolvedShortcuts {
     toggle_listening: Shortcut,
     toggle_overlay: Shortcut,
-    warnings: Vec<String>,
+    warnings: Vec<UserMessage>,
 }
 
-pub(crate) fn normalize_shortcuts(settings: &mut ShortcutSettings) -> Vec<String> {
+pub(crate) fn normalize_shortcuts(settings: &mut ShortcutSettings) -> Vec<UserMessage> {
     resolve_shortcuts(settings).warnings
 }
 
@@ -38,13 +38,13 @@ fn resolve_shortcuts(settings: &mut ShortcutSettings) -> ResolvedShortcuts {
     let toggle_listening = parse_or_default(
         &mut settings.toggle_listening,
         &defaults.toggle_listening,
-        "Toggle listening",
+        ShortcutAction::ToggleListening,
         &mut warnings,
     );
     let mut toggle_overlay = parse_or_default(
         &mut settings.toggle_overlay,
         &defaults.toggle_overlay,
-        "Show or hide overlay",
+        ShortcutAction::ToggleOverlay,
         &mut warnings,
     );
 
@@ -59,9 +59,10 @@ fn resolve_shortcuts(settings: &mut ShortcutSettings) -> ResolvedShortcuts {
     seen.insert(toggle_listening.id());
     if !seen.insert(toggle_overlay.id()) {
         let default_value = defaults.toggle_overlay.clone();
-        warnings.push(format!(
-            "Show or hide overlay shortcut duplicated another action, fallback to default {default_value}"
-        ));
+        warnings.push(
+            UserMessage::new("diagnostics:shortcutDuplicateToggleOverlay")
+                .param("fallback", &default_value),
+        );
         settings.toggle_overlay = default_value.clone();
         // Re-resolve from the default. If even the default is unparseable
         // (compile-time bug), `parse_or_default` will replace the value with
@@ -69,7 +70,7 @@ fn resolve_shortcuts(settings: &mut ShortcutSettings) -> ResolvedShortcuts {
         toggle_overlay = parse_or_default(
             &mut settings.toggle_overlay,
             &default_value,
-            "Show or hide overlay",
+            ShortcutAction::ToggleOverlay,
             &mut warnings,
         );
     }
@@ -94,8 +95,8 @@ fn resolve_shortcuts(settings: &mut ShortcutSettings) -> ResolvedShortcuts {
 fn parse_or_default(
     value: &mut String,
     default_value: &str,
-    label: &str,
-    warnings: &mut Vec<String>,
+    action: ShortcutAction,
+    warnings: &mut Vec<UserMessage>,
 ) -> Shortcut {
     if let Ok(shortcut) = Shortcut::from_str(value.trim()) {
         *value = value.trim().to_string();
@@ -105,9 +106,8 @@ fn parse_or_default(
     // Parse failure on user-supplied value — fall back to default.
     *value = default_value.to_string();
     if let Ok(shortcut) = Shortcut::from_str(default_value) {
-        warnings.push(format!(
-            "{label} shortcut is invalid, fallback to default {default_value}"
-        ));
+        warnings
+            .push(UserMessage::new(shortcut_invalid_code(action)).param("fallback", default_value));
         return shortcut;
     }
 
@@ -116,11 +116,27 @@ fn parse_or_default(
     // `DEFAULT_TOGGLE_LISTENING_SHORTCUT` exactly because that's the value
     // we know is hand-audited; if even that fails, fall through to a hard
     // ASCII variant that doesn't depend on the CmdOrCtrl alias.
-    warnings.push(format!(
-        "{label} default shortcut {default_value} is unparseable, using built-in fallback {DEFAULT_TOGGLE_LISTENING_SHORTCUT}"
-    ));
+    warnings.push(
+        UserMessage::new(shortcut_default_invalid_code(action))
+            .param("fallback", default_value)
+            .param("baseline", DEFAULT_TOGGLE_LISTENING_SHORTCUT),
+    );
     Shortcut::from_str(DEFAULT_TOGGLE_LISTENING_SHORTCUT)
         .unwrap_or_else(|_| Shortcut::from_str("Ctrl+Shift+L").expect("baseline shortcut parses"))
+}
+
+fn shortcut_invalid_code(action: ShortcutAction) -> &'static str {
+    match action {
+        ShortcutAction::ToggleListening => "diagnostics:shortcutInvalidToggleListening",
+        ShortcutAction::ToggleOverlay => "diagnostics:shortcutInvalidToggleOverlay",
+    }
+}
+
+fn shortcut_default_invalid_code(action: ShortcutAction) -> &'static str {
+    match action {
+        ShortcutAction::ToggleListening => "diagnostics:shortcutDefaultInvalidToggleListening",
+        ShortcutAction::ToggleOverlay => "diagnostics:shortcutDefaultInvalidToggleOverlay",
+    }
 }
 
 #[cfg(desktop)]
@@ -128,7 +144,7 @@ pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Re
     let mut settings = relay.snapshot_result()?.settings.shortcuts;
     let resolved = resolve_shortcuts(&mut settings);
     for warning in &resolved.warnings {
-        relay.push_diagnostic("warning", warning)?;
+        relay.push_diagnostic("warning", warning.clone())?;
     }
 
     let relay_for_handler = relay.clone();
@@ -144,7 +160,8 @@ pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Re
                     Err(error) => {
                         let _ = relay_for_handler.push_diagnostic(
                             "error",
-                            format!("Global shortcut snapshot failed: {error:#}"),
+                            UserMessage::new("diagnostics:globalShortcutSnapshotFailed")
+                                .param("error", format!("{error:#}")),
                         );
                         return;
                     }
@@ -168,8 +185,11 @@ pub(crate) fn configure_global_shortcuts(app: &AppHandle, relay: RelayApp) -> Re
                 };
 
                 if let Err(error) = result {
-                    let _ = relay_for_handler
-                        .push_diagnostic("error", format!("Global shortcut failed: {error:#}"));
+                    let _ = relay_for_handler.push_diagnostic(
+                        "error",
+                        UserMessage::new("diagnostics:globalShortcutFailed")
+                            .param("error", format!("{error:#}")),
+                    );
                 }
             })
             .build(),
@@ -253,7 +273,9 @@ mod tests {
             ShortcutSettings::default().toggle_listening
         );
         assert!(
-            warnings.iter().any(|w| w.contains("Toggle listening")),
+            warnings
+                .iter()
+                .any(|w| w.code == "diagnostics:shortcutInvalidToggleListening"),
             "{warnings:?}"
         );
     }
@@ -273,7 +295,9 @@ mod tests {
             ShortcutSettings::default().toggle_overlay
         );
         assert!(
-            warnings.iter().any(|w| w.contains("duplicated")),
+            warnings
+                .iter()
+                .any(|w| w.code == "diagnostics:shortcutDuplicateToggleOverlay"),
             "{warnings:?}"
         );
     }

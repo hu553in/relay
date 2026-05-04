@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { diagnosticLevelTone } from '@/lib/diagnostics';
 import type { DiagnosticsEntry } from '@/lib/types';
+import { formatUserMessage } from '@/lib/userMessages';
 
 export interface ToastItem {
   id: string;
@@ -15,6 +17,7 @@ const DIAGNOSTIC_TOAST_MS = 4200;
 const MANUAL_TOAST_MS = 3200;
 
 export function useToastCenter(diagnostics: DiagnosticsEntry[] | null | undefined) {
+  const { t } = useTranslation(['app', 'diagnostics', 'runtime', 'source']);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const seenRef = useRef<Set<string> | null>(null);
   const timersRef = useRef<Map<string, number>>(new Map());
@@ -92,14 +95,14 @@ export function useToastCenter(diagnostics: DiagnosticsEntry[] | null | undefine
       enqueue(
         {
           id: entry.id,
-          title: 'Relay',
-          message: entry.message,
+          title: t('app:toastTitle'),
+          message: formatUserMessage(entry.message, t) ?? '',
           tone: diagnosticLevelTone(entry.level),
         },
         DIAGNOSTIC_TOAST_MS
       );
     }
-  }, [diagnostics, enqueue]);
+  }, [diagnostics, enqueue, t]);
 
   useEffect(() => {
     const timers = timersRef.current;

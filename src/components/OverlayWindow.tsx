@@ -1,5 +1,6 @@
 import { AudioLines, Languages, X } from 'lucide-react';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { SegmentLogPanel } from '@/components/SegmentLogPanel';
 import { Badge } from '@/components/shared/Badge';
@@ -10,13 +11,14 @@ import { useAppConstants } from '@/hooks/useAppConstants';
 import { useSegmentLogEntries } from '@/hooks/useSegmentLogEntries';
 import { useToastCenter } from '@/hooks/useToastCenter';
 import { toErrorMessage } from '@/lib/errors';
-import { listeningStateLabel } from '@/lib/format';
+import { listeningStateLabel, listeningStateLabels, type TranslateFn } from '@/lib/format';
 import { clearSegments, clearTranslationLog, hideOverlay } from '@/lib/relay';
 import type { ListeningState, RelaySnapshotState } from '@/lib/types';
 
 const OVERLAY_MAX_ROWS = 28;
 
 export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
+  const { t } = useTranslation(['app', 'common', 'controls', 'listening', 'logs', 'overlay']);
   const snapshot = relay.snapshot;
   const constants = useAppConstants();
   const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics);
@@ -52,14 +54,14 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
               <LogoMark listening={isLive} shrink />
               <div className='flex min-w-0 items-center gap-2'>
                 <h1 className='mt-0.5 truncate text-[13px] font-medium text-white'>
-                  Live transcription
+                  {t('overlay:liveTranscription')}
                 </h1>
                 <StatusChip state={state} />
               </div>
             </div>
             <div data-tauri-drag-region='false' className='flex items-center gap-1.5'>
               <IconButton
-                label='Hide overlay'
+                label={t('controls:hideOverlay')}
                 icon={<X size={14} />}
                 onClick={() => void hideOverlay()}
               />
@@ -68,40 +70,50 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
 
           <div className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-2.5 overflow-hidden p-2.5'>
             <SegmentLogPanel
-              title='Original'
+              title={t('logs:original')}
               language='EN'
               icon={<AudioLines size={16} />}
               entries={originalEntries}
               live={isLive}
               onCopyError={reason => {
-                pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
+                pushToast({
+                  title: t('app:toastTitle'),
+                  message: toErrorMessage(reason),
+                  tone: 'error',
+                });
               }}
               actions={
                 <ClearLogButton
-                  label='Clear transcript log'
+                  label={t('logs:clearTranscript')}
                   disabled={originalEntries.length === 0}
                   onClick={() => void clearSegments()}
                 />
               }
               footer={
                 <div className='flex w-full items-center justify-between gap-3'>
-                  <span>{listeningStateLabel(state)}</span>
-                  <span>{originalEntries.length} lines</span>
+                  <span>
+                    {listeningStateLabel(state, listeningStateLabels(t as unknown as TranslateFn))}
+                  </span>
+                  <span>{t('common:lineCount', { count: originalEntries.length })}</span>
                 </div>
               }
             />
             <SegmentLogPanel
-              title='Translation'
+              title={t('logs:translation')}
               language={targetLanguage}
               icon={<Languages size={16} />}
               entries={translationEntries}
               live={isLive}
               onCopyError={reason => {
-                pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
+                pushToast({
+                  title: t('app:toastTitle'),
+                  message: toErrorMessage(reason),
+                  tone: 'error',
+                });
               }}
               actions={
                 <ClearLogButton
-                  label='Clear translation log'
+                  label={t('logs:clearTranslation')}
                   disabled={translationEntries.length === 0}
                   onClick={() => void clearTranslationLog()}
                 />
@@ -109,7 +121,7 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
               footer={
                 <div className='flex w-full items-center justify-between gap-3'>
                   <span>{targetLanguage.toUpperCase()}</span>
-                  <span>{translationEntries.length} lines</span>
+                  <span>{t('common:lineCount', { count: translationEntries.length })}</span>
                 </div>
               }
             />
@@ -123,6 +135,7 @@ export function OverlayWindow({ relay }: { relay: RelaySnapshotState }) {
 }
 
 function StatusChip({ state }: { state: ListeningState }) {
+  const { t } = useTranslation(['common', 'listening']);
   const tone =
     state === 'listening'
       ? 'success'
@@ -136,7 +149,7 @@ function StatusChip({ state }: { state: ListeningState }) {
       {state === 'listening' ? (
         <span className='relay-dot-live block h-1.5 w-1.5 rounded-full bg-emerald-300' />
       ) : null}
-      {listeningStateLabel(state)}
+      {listeningStateLabel(state, listeningStateLabels(t as unknown as TranslateFn))}
     </Badge>
   );
 }

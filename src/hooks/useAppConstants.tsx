@@ -1,6 +1,7 @@
 import { createContext, type PropsWithChildren, useContext, useEffect, useState } from 'react';
 
 import { WindowShell } from '@/components/shared/WindowChrome';
+import i18n from '@/i18n';
 import { toErrorMessage } from '@/lib/errors';
 import { getAppConstants } from '@/lib/relay';
 import type { AppConstants } from '@/lib/types';
@@ -38,11 +39,11 @@ export function AppConstantsProvider({ children }: PropsWithChildren) {
     // Render the same chrome as the snapshot loading screen so the boot
     // experience stays consistent. A failure here is unrecoverable from
     // the webview side — it means the Tauri command pipe is broken.
-    return <WindowShell message={`Failed to load app constants: ${error}`} />;
+    return <WindowShell message={i18n.t('boot:constantsError', { error })} />;
   }
 
   if (!constants) {
-    return <WindowShell message='Loading Relay constants...' />;
+    return <WindowShell message={i18n.t('boot:loadingConstants')} />;
   }
 
   return <AppConstantsContext.Provider value={constants}>{children}</AppConstantsContext.Provider>;

@@ -27,7 +27,7 @@ describe('InputSourceStatusCard', () => {
         source={source({
           available: false,
           health: 'unavailable',
-          detail: 'No loopback runtime',
+          detail: { code: 'source:systemAudioNeedsLoopback' },
         })}
         onToggle={onToggle}
       />

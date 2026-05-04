@@ -4,7 +4,7 @@ use anyhow::Result;
 use tokio::sync::mpsc;
 
 use crate::audio::RawAudioChunk;
-use crate::domain::{InputSource, SourceCapability};
+use crate::domain::{InputSource, SourceCapability, UserMessage};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -20,7 +20,7 @@ pub(crate) use output_loopback::SystemAudioInputHandle;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub(crate) use unsupported::SystemAudioInputHandle;
 
-pub(crate) type AudioErrorCallback = Arc<dyn Fn(InputSource, String) + Send + Sync>;
+pub(crate) type AudioErrorCallback = Arc<dyn Fn(InputSource, UserMessage) + Send + Sync>;
 
 pub(crate) fn capability() -> SourceCapability {
     backend_capability()
@@ -43,5 +43,5 @@ fn backend_capability() -> SourceCapability {
 
 pub(crate) trait SystemAudioBackend: Sized {
     fn start(tx: mpsc::Sender<RawAudioChunk>, on_error: AudioErrorCallback) -> Result<Self>;
-    fn detail(&self) -> &'static str;
+    fn detail(&self) -> UserMessage;
 }

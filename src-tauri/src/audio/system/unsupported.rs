@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use tokio::sync::mpsc;
 
 use crate::audio::RawAudioChunk;
-use crate::domain::{InputSource, SourceCapability};
+use crate::domain::{InputSource, SourceCapability, UserMessage};
 
 use super::{AudioErrorCallback, SystemAudioBackend};
 
@@ -13,8 +13,8 @@ impl SystemAudioBackend for SystemAudioInputHandle {
         bail!("System audio capture is not implemented on this platform")
     }
 
-    fn detail(&self) -> &'static str {
-        "System audio capture is not implemented on this platform"
+    fn detail(&self) -> UserMessage {
+        UserMessage::new("source:systemAudioUnsupported")
     }
 }
 
@@ -26,11 +26,11 @@ impl SystemAudioInputHandle {
         <Self as SystemAudioBackend>::start(tx, on_error)
     }
 
-    pub(crate) fn detail(&self) -> &'static str {
+    pub(crate) fn detail(&self) -> UserMessage {
         <Self as SystemAudioBackend>::detail(self)
     }
 }
 
 pub(crate) fn capability() -> SourceCapability {
-    SourceCapability::unavailable("System audio capture is not implemented on this platform")
+    SourceCapability::unavailable(UserMessage::new("source:systemAudioUnsupported"))
 }

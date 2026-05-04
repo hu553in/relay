@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -8,7 +9,7 @@ use crate::constants::{
     DEFAULT_TOGGLE_OVERLAY_SHORTCUT, DEFAULT_TRANSCRIPTION_HOP_SECONDS,
     DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS, DEFAULT_TRANSCRIPTION_THREADS,
     DEFAULT_TRANSCRIPTION_WINDOW_SECONDS, DEFAULT_TRANSLATION_CONTEXT_TOKENS,
-    DEFAULT_TRANSLATION_THREADS,
+    DEFAULT_TRANSLATION_THREADS, DEFAULT_UI_LANGUAGE,
 };
 
 const DEFAULT_TRANSLATION_MODEL_PATH: &str = "";
@@ -49,33 +50,55 @@ pub enum SegmentStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct UserMessage {
+    pub code: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, String>,
+}
+
+impl UserMessage {
+    pub(crate) fn new(code: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            params: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn param(mut self, key: impl Into<String>, value: impl ToString) -> Self {
+        self.params.insert(key.into(), value.to_string());
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SourceState {
     pub enabled: bool,
     pub available: bool,
     pub capturing: bool,
     pub health: ServiceHealth,
     pub input_level: Option<u8>,
-    pub detail: Option<String>,
+    pub detail: Option<UserMessage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SourceCapability {
     pub(crate) available: bool,
-    pub(crate) detail: String,
+    pub(crate) detail: UserMessage,
 }
 
 impl SourceCapability {
-    pub(crate) fn available(detail: impl Into<String>) -> Self {
+    pub(crate) fn available(detail: UserMessage) -> Self {
         Self {
             available: true,
-            detail: detail.into(),
+            detail,
         }
     }
 
-    pub(crate) fn unavailable(detail: impl Into<String>) -> Self {
+    pub(crate) fn unavailable(detail: UserMessage) -> Self {
         Self {
             available: false,
-            detail: detail.into(),
+            detail,
         }
     }
 }
@@ -180,6 +203,21 @@ impl Default for OverlaySettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct InterfaceSettings {
+    #[serde(default = "default_ui_language")]
+    pub ui_language: String,
+}
+
+impl Default for InterfaceSettings {
+    fn default() -> Self {
+        Self {
+            ui_language: DEFAULT_UI_LANGUAGE.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct RelaySettings {
     pub microphone_enabled: bool,
     pub system_audio_enabled: bool,
@@ -197,6 +235,8 @@ pub struct RelaySettings {
     pub translation: TranslationSettings,
     pub overlay: OverlaySettings,
     #[serde(default)]
+    pub interface: InterfaceSettings,
+    #[serde(default)]
     pub shortcuts: ShortcutSettings,
 }
 
@@ -213,6 +253,7 @@ impl Default for RelaySettings {
             stt_sentence_timeout_ms: DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS,
             translation: TranslationSettings::default(),
             overlay: OverlaySettings::default(),
+            interface: InterfaceSettings::default(),
             shortcuts: ShortcutSettings::default(),
         }
     }
@@ -259,7 +300,7 @@ pub struct DiagnosticsEntry {
     pub id: Uuid,
     pub timestamp_ms: u64,
     pub level: String,
-    pub message: String,
+    pub message: UserMessage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,13 +319,13 @@ pub struct SegmentRecord {
 pub struct AppSnapshot {
     pub listening_state: ListeningState,
     pub settings: RelaySettings,
-    pub shortcut_warnings: Vec<String>,
+    pub shortcut_warnings: Vec<UserMessage>,
     pub microphone: SourceState,
     pub system_audio: SourceState,
     pub stt_health: ServiceHealth,
-    pub stt_detail: Option<String>,
+    pub stt_detail: Option<UserMessage>,
     pub translation_health: ServiceHealth,
-    pub translation_detail: Option<String>,
+    pub translation_detail: Option<UserMessage>,
     pub active_session_id: Option<Uuid>,
     pub session_started_at_ms: Option<u64>,
     pub session_segment_count: u32,
@@ -366,7 +407,7 @@ impl Default for AppSnapshot {
                 capturing: false,
                 health: ServiceHealth::Ready,
                 input_level: Some(0),
-                detail: Some("Uses the default input device".to_string()),
+                detail: Some(UserMessage::new("source:usesDefaultInputDevice")),
             },
             system_audio: SourceState {
                 enabled: false,
@@ -374,15 +415,12 @@ impl Default for AppSnapshot {
                 capturing: false,
                 health: ServiceHealth::Unavailable,
                 input_level: Some(0),
-                detail: Some(
-                    "System audio capture uses the default output device loopback when that path is available"
-                        .to_string(),
-                ),
+                detail: Some(UserMessage::new("source:systemAudioLoopbackDescription")),
             },
             stt_health: ServiceHealth::Unknown,
-            stt_detail: Some("Configure a local Whisper model to start live transcription".to_string()),
+            stt_detail: Some(UserMessage::new("runtime:chooseWhisperModel")),
             translation_health: ServiceHealth::Unknown,
-            translation_detail: Some("Local llama.cpp translation is optional. Relay continues without translation.".to_string()),
+            translation_detail: Some(UserMessage::new("runtime:chooseTranslationModel")),
             active_session_id: None,
             session_started_at_ms: None,
             session_segment_count: 0,
@@ -399,6 +437,10 @@ impl Default for AppSnapshot {
 
 const fn default_true() -> bool {
     true
+}
+
+fn default_ui_language() -> String {
+    DEFAULT_UI_LANGUAGE.to_string()
 }
 
 fn normalize_model_location(directory: &mut String, selected_model: &mut String) {

@@ -10,6 +10,7 @@ import {
   Square,
 } from 'lucide-react';
 import { type PropsWithChildren, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { SegmentLogPanel } from '@/components/SegmentLogPanel';
@@ -27,7 +28,10 @@ import {
   formatMemoryPair,
   formatPercent,
   formatRelayCpu,
+  formatTemperatureC,
   listeningStateLabel,
+  listeningStateLabels,
+  type TranslateFn,
 } from '@/lib/format';
 import {
   clearSegments,
@@ -49,6 +53,7 @@ import type {
 } from '@/lib/types';
 
 export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
+  const { i18n, t } = useTranslation(['app', 'boot', 'common', 'controls', 'listening', 'logs']);
   const snapshot = relay.snapshot;
   const [actionError, setActionError] = useState<string | null>(null);
   const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics);
@@ -97,7 +102,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
   const sessionStartedAtMs = snapshot?.sessionStartedAtMs ?? null;
 
   if (relay.isLoading || !snapshot) {
-    return <WindowShell message={relay.error ?? 'Loading Relay overview...'} />;
+    return <WindowShell message={relay.error ?? t('boot:loadingOverview')} />;
   }
 
   const state = snapshot.listeningState;
@@ -115,9 +120,12 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
     } catch (reason) {
       const message = toErrorMessage(reason);
       setActionError(message);
-      pushToast({ title: 'Relay', message, tone: 'error' });
+      pushToast({ title: t('app:toastTitle'), message, tone: 'error' });
     }
   }
+
+  const stateLabels = listeningStateLabels(t as unknown as TranslateFn);
+  const unavailable = t('common:unavailable');
 
   return (
     <main className='bg-(--relay-app-bg) flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
@@ -139,19 +147,23 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
               <div className='flex flex-wrap items-center gap-4'>
                 <div className='flex items-center gap-2'>
                   <IconButton
-                    label={showStats ? 'Hide stats' : 'Show stats'}
+                    label={showStats ? t('controls:hideStats') : t('controls:showStats')}
                     onClick={() => {
                       setShowStats(value => !value);
                     }}
                     icon={showStats ? <House size={15} /> : <HeartPulse size={15} />}
                   />
                   <IconButton
-                    label='Open settings'
+                    label={t('controls:openSettings')}
                     onClick={() => void run(() => showSettingsSection('inputs'))}
                     icon={<Settings size={15} />}
                   />
                   <IconButton
-                    label={snapshot.settings.overlay.visible ? 'Hide overlay' : 'Show overlay'}
+                    label={
+                      snapshot.settings.overlay.visible
+                        ? t('controls:hideOverlay')
+                        : t('controls:showOverlay')
+                    }
                     onClick={() =>
                       void run(snapshot.settings.overlay.visible ? hideOverlay : showOverlay)
                     }
@@ -172,10 +184,10 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                   {isListening ? <Square size={14} /> : <Play size={14} />}
                   <span>
                     {state === 'starting'
-                      ? 'Starting...'
+                      ? t('listening:startingAction')
                       : isListening
-                        ? 'Stop listening'
-                        : 'Start listening'}
+                        ? t('listening:stop')
+                        : t('listening:start')}
                   </span>
                 </PrimaryButton>
               </div>
@@ -192,12 +204,12 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
             <div className='relay-scroll grid min-h-0 flex-1 content-start gap-3 overflow-y-auto rounded-2xl border border-white/8 bg-(--relay-card-bg) p-3'>
               <div className='grid gap-3 md:grid-cols-2'>
                 <ModelCard
-                  title='Transcription'
+                  title={t('controls:transcription')}
                   model={activeTranscription}
                   health={snapshot.sttHealth}
                 />
                 <ModelCard
-                  title='Translation'
+                  title={t('logs:translation')}
                   model={activeTranslation}
                   health={snapshot.translationHealth}
                 />
@@ -208,30 +220,40 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                   startedAtMs={sessionStartedAtMs}
                   accent={isListening}
                 />
-                <StatPill label='Segments' value={String(snapshot.sessionSegmentCount)} />
-                <StatPill label='Translated' value={String(snapshot.sessionTranslationCount)} />
                 <StatPill
-                  label='Failed'
+                  label={t('controls:segments')}
+                  value={String(snapshot.sessionSegmentCount)}
+                />
+                <StatPill
+                  label={t('controls:translated')}
+                  value={String(snapshot.sessionTranslationCount)}
+                />
+                <StatPill
+                  label={t('common:failed')}
                   value={String(snapshot.sessionTranslationFailureCount)}
                   warn={snapshot.sessionTranslationFailureCount > 0}
                 />
               </div>
               <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
                 <MetricPill
-                  label='System CPU'
-                  value={formatPercent(systemMetrics?.systemCpuUsage)}
+                  label={t('controls:systemCpu')}
+                  value={formatPercent(systemMetrics?.systemCpuUsage, unavailable, i18n.language)}
                 />
-                <MetricPill label='App CPU' value={formatRelayCpu(systemMetrics)} />
                 <MetricPill
-                  label='System memory'
+                  label={t('controls:appCpu')}
+                  value={formatRelayCpu(systemMetrics, unavailable, i18n.language)}
+                />
+                <MetricPill
+                  label={t('controls:systemMemory')}
                   value={formatMemoryPair(
                     systemMetrics?.memoryUsedBytes,
-                    systemMetrics?.memoryTotalBytes
+                    systemMetrics?.memoryTotalBytes,
+                    unavailable
                   )}
                 />
                 <MetricPill
-                  label='App memory'
-                  value={formatMemoryCompact(systemMetrics?.processMemoryBytes)}
+                  label={t('controls:appMemory')}
+                  value={formatMemoryCompact(systemMetrics?.processMemoryBytes, unavailable)}
                 />
                 <TemperatureChipsCard metrics={systemMetrics} />
               </div>
@@ -240,7 +262,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
             <>
               <div className='grid shrink-0 gap-3 md:grid-cols-2'>
                 <InputSourceStatusCard
-                  title='Microphone'
+                  title={t('controls:microphone')}
                   source={snapshot.microphone}
                   onToggle={enabled =>
                     void run(() =>
@@ -252,7 +274,7 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                   }
                 />
                 <InputSourceStatusCard
-                  title='System audio'
+                  title={t('controls:systemAudio')}
                   source={snapshot.systemAudio}
                   onToggle={enabled =>
                     void run(() =>
@@ -267,17 +289,21 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
 
               <section className='grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden'>
                 <SegmentLogPanel
-                  title='Original'
+                  title={t('logs:original')}
                   language='EN'
                   icon={<AudioLines size={16} />}
                   entries={originalEntries}
                   live={isListening}
                   onCopyError={reason => {
-                    pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
+                    pushToast({
+                      title: t('app:toastTitle'),
+                      message: toErrorMessage(reason),
+                      tone: 'error',
+                    });
                   }}
                   actions={
                     <ClearLogButton
-                      label='Clear transcript log'
+                      label={t('logs:clearTranscript')}
                       disabled={originalEntries.length === 0}
                       onClick={() => void run(clearSegments)}
                     />
@@ -288,30 +314,42 @@ export function ControlsWindow({ relay }: { relay: RelaySnapshotState }) {
                         key={sessionStartedAtMs ?? 'idle'}
                         startedAtMs={sessionStartedAtMs}
                       />
-                      <span>{listeningStateLabel(state)}</span>
+                      <span>{listeningStateLabel(state, stateLabels)}</span>
                     </div>
                   }
                 />
                 <SegmentLogPanel
-                  title='Translation'
+                  title={t('logs:translation')}
                   language={snapshot.settings.translation.targetLanguage}
                   icon={<Languages size={16} />}
                   entries={translationEntries}
                   live={isListening}
                   onCopyError={reason => {
-                    pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
+                    pushToast({
+                      title: t('app:toastTitle'),
+                      message: toErrorMessage(reason),
+                      tone: 'error',
+                    });
                   }}
                   actions={
                     <ClearLogButton
-                      label='Clear translation log'
+                      label={t('logs:clearTranslation')}
                       disabled={translationEntries.length === 0}
                       onClick={() => void run(clearTranslationLog)}
                     />
                   }
                   footer={
                     <div className='flex w-full items-center justify-between gap-3'>
-                      <span>{snapshot.sessionTranslationCount} translated</span>
-                      <span>{snapshot.sessionTranslationFailureCount} failed</span>
+                      <span>
+                        {t('logs:translatedCount', {
+                          count: snapshot.sessionTranslationCount,
+                        })}
+                      </span>
+                      <span>
+                        {t('logs:failedCount', {
+                          count: snapshot.sessionTranslationFailureCount,
+                        })}
+                      </span>
                     </div>
                   }
                 />
@@ -334,19 +372,20 @@ function ModelCard({
   model: ModelRecord | undefined;
   health: ServiceHealth;
 }) {
+  const { t } = useTranslation(['common', 'controls']);
   return (
     <article className='rounded-xl border border-white/6 bg-(--relay-card-bg) px-4 py-3'>
       <div className='flex items-center justify-between gap-3'>
         <div className='min-w-0'>
           <p className='text-[11px] font-medium text-stone-500'>{title}</p>
           <p className='mt-1 truncate text-[13px] text-stone-200'>
-            {model?.relativePath ?? model?.name ?? 'No model selected'}
+            {model?.relativePath ?? model?.name ?? t('controls:noModelSelected')}
           </p>
         </div>
         <HealthBadge health={health} />
       </div>
       <p className='mt-2 min-w-0 truncate text-[12px] text-stone-400'>
-        {model?.path ?? model?.relativePath ?? 'Not selected'}
+        {model?.path ?? model?.relativePath ?? t('common:notSelected')}
       </p>
     </article>
   );
@@ -384,11 +423,12 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 }
 
 function TemperatureChipsCard({ metrics }: { metrics: SystemMetrics | null }) {
+  const { i18n, t } = useTranslation(['common', 'controls']);
   const readings = hotTemperatureReadings(metrics);
 
   return (
     <div className='rounded-xl border border-white/6 bg-(--relay-card-bg) px-4 py-3 sm:col-span-2 xl:col-span-4'>
-      <p className='text-[11px] font-medium text-stone-500'>Temperature sensors</p>
+      <p className='text-[11px] font-medium text-stone-500'>{t('controls:temperatureSensors')}</p>
       {readings.length > 0 ? (
         <div className='mt-2 flex flex-wrap gap-2'>
           {readings.map(reading => (
@@ -399,13 +439,13 @@ function TemperatureChipsCard({ metrics }: { metrics: SystemMetrics | null }) {
             >
               <span className='max-w-40 truncate'>{reading.label}</span>
               <span className='font-medium tabular-nums text-white'>
-                {reading.temperatureC.toFixed(0)} ℃
+                {formatTemperatureC(reading.temperatureC, t('common:unavailable'), i18n.language)}
               </span>
             </span>
           ))}
         </div>
       ) : (
-        <p className='mt-1 text-[13px] text-stone-400'>Unavailable</p>
+        <p className='mt-1 text-[13px] text-stone-400'>{t('common:unavailable')}</p>
       )}
     </div>
   );
@@ -440,11 +480,13 @@ function PrimaryButton({
 }
 
 function LiveBadge({ state }: { state: ListeningState }) {
+  const { t } = useTranslation(['common', 'listening']);
+  const labels = listeningStateLabels(t as unknown as TranslateFn);
   if (state === 'listening') {
     return (
       <Badge tone='success' size='md'>
         <span className='relay-dot-live block h-1.5 w-1.5 rounded-full bg-emerald-300' />
-        Live
+        {t('common:live')}
       </Badge>
     );
   }
@@ -452,7 +494,7 @@ function LiveBadge({ state }: { state: ListeningState }) {
 
   return (
     <Badge tone={tone} size='md'>
-      {listeningStateLabel(state)}
+      {listeningStateLabel(state, labels)}
     </Badge>
   );
 }
@@ -482,8 +524,9 @@ function SessionClockPill({
   startedAtMs: number | null;
   accent: boolean;
 }) {
+  const { t } = useTranslation('controls');
   const elapsed = useSessionElapsed(startedAtMs);
-  return <StatPill label='Live session' value={elapsed} accent={accent} />;
+  return <StatPill label={t('liveSession')} value={elapsed} accent={accent} />;
 }
 
 function SessionClockText({ startedAtMs }: { startedAtMs: number | null }) {

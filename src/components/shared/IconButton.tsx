@@ -1,5 +1,6 @@
 import { BrushCleaning } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export function IconButton({
   label,
@@ -27,7 +28,7 @@ export function IconButton({
 }
 
 export function ClearLogButton({
-  label = 'Clear log',
+  label,
   onClick,
   disabled = false,
 }: {
@@ -35,9 +36,10 @@ export function ClearLogButton({
   onClick: () => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation('common');
   return (
     <IconButton
-      label={label}
+      label={label ?? t('clearLog')}
       onClick={onClick}
       disabled={disabled}
       icon={<BrushCleaning size={14} />}

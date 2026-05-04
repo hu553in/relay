@@ -10,9 +10,12 @@ use crate::constants::{
     DEFAULT_TOGGLE_OVERLAY_SHORTCUT, DEFAULT_TRANSCRIPTION_HOP_SECONDS,
     DEFAULT_TRANSCRIPTION_SENTENCE_TIMEOUT_MS, DEFAULT_TRANSCRIPTION_THREADS,
     DEFAULT_TRANSCRIPTION_WINDOW_SECONDS, DEFAULT_TRANSLATION_CONTEXT_TOKENS,
-    DEFAULT_TRANSLATION_THREADS,
+    DEFAULT_TRANSLATION_THREADS, DEFAULT_UI_LANGUAGE,
 };
-use crate::domain::{OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings};
+use crate::domain::{
+    InterfaceSettings, OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings,
+    UserMessage,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct SettingsStore {
@@ -22,7 +25,7 @@ pub(crate) struct SettingsStore {
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedSettings {
     pub(crate) settings: RelaySettings,
-    pub(crate) warning: Option<String>,
+    pub(crate) warning: Option<UserMessage>,
 }
 
 impl SettingsStore {
@@ -44,10 +47,11 @@ impl SettingsStore {
                 },
                 Err(error) => LoadedSettings {
                     settings: RelaySettings::default(),
-                    warning: Some(format!(
-                        "Settings file {} could not be parsed. Defaults are active until settings are saved: {error}",
-                        self.path.display()
-                    )),
+                    warning: Some(
+                        UserMessage::new("diagnostics:settingsParseFailed")
+                            .param("path", self.path.display())
+                            .param("error", error),
+                    ),
                 },
             },
             Err(error) if error.kind() == ErrorKind::NotFound => LoadedSettings {
@@ -56,10 +60,11 @@ impl SettingsStore {
             },
             Err(error) => LoadedSettings {
                 settings: RelaySettings::default(),
-                warning: Some(format!(
-                    "Settings file {} could not be read. Defaults are active until settings are saved: {error}",
-                    self.path.display()
-                )),
+                warning: Some(
+                    UserMessage::new("diagnostics:settingsReadFailed")
+                        .param("path", self.path.display())
+                        .param("error", error),
+                ),
             },
         }
     }
@@ -135,6 +140,8 @@ struct SettingsFile {
     #[serde(default)]
     overlay: OverlayFile,
     #[serde(default)]
+    interface: InterfaceFile,
+    #[serde(default)]
     shortcuts: ShortcutsFile,
 }
 
@@ -160,6 +167,9 @@ impl SettingsFile {
             overlay: OverlaySettings {
                 visible: self.overlay.visible,
                 always_on_top: self.overlay.always_on_top,
+            },
+            interface: InterfaceSettings {
+                ui_language: self.interface.ui_language,
             },
             shortcuts: ShortcutSettings {
                 toggle_listening: self.shortcuts.toggle_listening,
@@ -195,6 +205,9 @@ impl From<&RelaySettings> for SettingsFile {
             overlay: OverlayFile {
                 visible: settings.overlay.visible,
                 always_on_top: settings.overlay.always_on_top,
+            },
+            interface: InterfaceFile {
+                ui_language: settings.interface.ui_language.clone(),
             },
             shortcuts: ShortcutsFile {
                 toggle_listening: settings.shortcuts.toggle_listening.clone(),
@@ -302,6 +315,21 @@ impl Default for OverlayFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct InterfaceFile {
+    #[serde(default = "default_ui_language")]
+    ui_language: String,
+}
+
+impl Default for InterfaceFile {
+    fn default() -> Self {
+        Self {
+            ui_language: default_ui_language(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ShortcutsFile {
     #[serde(default = "default_toggle_listening")]
     toggle_listening: String,
@@ -328,6 +356,10 @@ const fn default_true() -> bool {
 // settings file and the in-memory `Default` impls cannot drift.
 fn default_target_language() -> String {
     DEFAULT_TARGET_LANGUAGE.to_string()
+}
+
+fn default_ui_language() -> String {
+    DEFAULT_UI_LANGUAGE.to_string()
 }
 
 const fn default_max_tokens() -> u32 {
@@ -418,7 +450,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::{parse_settings, write_atomic, SettingsFile, SettingsStore};
-    use crate::domain::{OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings};
+    use crate::domain::{
+        InterfaceSettings, OverlaySettings, RelaySettings, ShortcutSettings, TranslationSettings,
+    };
 
     #[test]
     fn parses_sectioned_toml_settings() {
@@ -448,6 +482,9 @@ threads = 10
 visible = false
 always_on_top = false
 
+[interface]
+ui_language = "en"
+
 [shortcuts]
 toggle_listening = "CmdOrCtrl+Shift+T"
 toggle_overlay = "CmdOrCtrl+Shift+Y"
@@ -471,6 +508,7 @@ toggle_overlay = "CmdOrCtrl+Shift+Y"
         assert_eq!(settings.translation.threads, 10);
         assert!(!settings.overlay.visible);
         assert!(!settings.overlay.always_on_top);
+        assert_eq!(settings.interface.ui_language, "en");
         assert_eq!(settings.shortcuts.toggle_listening, "CmdOrCtrl+Shift+T");
         assert_eq!(settings.shortcuts.toggle_overlay, "CmdOrCtrl+Shift+Y");
     }
@@ -486,6 +524,19 @@ unknown_setting = true
         .expect_err("unknown fields should be rejected");
 
         assert!(error.to_string().contains("unknown_setting"));
+    }
+
+    #[test]
+    fn rejects_legacy_appearance_section() {
+        let error = parse_settings(
+            r#"
+[appearance]
+ui_language = "en"
+"#,
+        )
+        .expect_err("legacy appearance section should be rejected");
+
+        assert!(error.to_string().contains("appearance"));
     }
 
     #[test]
@@ -518,6 +569,7 @@ max_tokens = 64
             defaults.translation.context_tokens
         );
         assert_eq!(settings.translation.threads, defaults.translation.threads);
+        assert_eq!(settings.interface, defaults.interface);
     }
 
     /// Defaults must round-trip cleanly through serialize → parse to keep the
@@ -530,6 +582,8 @@ max_tokens = 64
             .expect("render defaults to TOML");
         let parsed = parse_settings(&rendered).expect("parse rendered defaults");
         assert_eq!(parsed, original);
+        assert!(rendered.contains("[interface]"));
+        assert!(!rendered.contains("[appearance]"));
     }
 
     /// `write_atomic` must leave the original file untouched on success and
@@ -591,6 +645,9 @@ max_tokens = 64
             overlay: OverlaySettings {
                 visible: false,
                 ..OverlaySettings::default()
+            },
+            interface: InterfaceSettings {
+                ui_language: "en".to_string(),
             },
             ..RelaySettings::default()
         };

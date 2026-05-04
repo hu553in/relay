@@ -7,42 +7,9 @@ import {
 } from '@headlessui/react';
 import { Check, ChevronDown } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
-const LANGUAGE_NAMES: Record<string, string> = {
-  en: 'English',
-  de: 'Deutsch',
-  es: 'Español',
-  fr: 'Français',
-  it: 'Italiano',
-  ja: '日本語',
-  ko: '한국어',
-  nl: 'Nederlands',
-  pl: 'Polski',
-  pt: 'Português',
-  ru: 'Русский',
-  tr: 'Türkçe',
-  uk: 'Українська',
-  zh: '中文',
-};
-
-// Keep this list explicit: the combobox must remain stable even if object
-// insertion order changes during future edits to LANGUAGE_NAMES.
-const COMMON_LANGUAGES = [
-  'en',
-  'de',
-  'es',
-  'fr',
-  'it',
-  'ja',
-  'ko',
-  'nl',
-  'pl',
-  'pt',
-  'ru',
-  'tr',
-  'uk',
-  'zh',
-];
+import { commonTargetLanguages, targetLanguageName } from '@/i18n/targetLanguages';
 
 export function LanguageCombobox({
   value,
@@ -51,24 +18,25 @@ export function LanguageCombobox({
   value: string;
   onChange: (next: string) => void;
 }) {
+  const { i18n, t } = useTranslation('targetLanguage');
   const [query, setQuery] = useState('');
 
   const trimmedQuery = query.trim();
   const needle = trimmedQuery.toLowerCase();
 
   const filtered = !needle
-    ? COMMON_LANGUAGES
-    : COMMON_LANGUAGES.filter(code => {
-        const name = LANGUAGE_NAMES[code] ?? code;
+    ? commonTargetLanguages
+    : commonTargetLanguages.filter(code => {
+        const name = targetLanguageName(code, i18n.language);
         return code.includes(needle) || name.toLowerCase().includes(needle);
       });
 
-  const showCreate = trimmedQuery.length > 0 && !COMMON_LANGUAGES.includes(needle);
+  const showCreate =
+    trimmedQuery.length > 0 && !commonTargetLanguages.some(code => code === needle);
 
   const displayValue = (code: string) => {
     if (!code) return '';
-    const name = LANGUAGE_NAMES[code];
-    return name ? `${code.toUpperCase()} · ${name}` : code;
+    return `${code.toUpperCase()} - ${targetLanguageName(code, i18n.language)}`;
   };
 
   return (
@@ -83,13 +51,13 @@ export function LanguageCombobox({
     >
       <div className='relative'>
         <ComboboxInput
-          aria-label='Target language'
+          aria-label={t('ariaLabel')}
           className='w-full rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 pr-8 text-[12px] text-white outline-none transition placeholder:text-stone-500 focus:border-stone-300/45'
           displayValue={displayValue}
           onChange={event => {
             setQuery(event.target.value);
           }}
-          placeholder='Search or type custom code'
+          placeholder={t('placeholder')}
         />
         <ComboboxButton className='absolute inset-y-0 right-2 grid place-items-center text-stone-400 transition hover:text-stone-200'>
           <ChevronDown size={16} />
@@ -108,7 +76,7 @@ export function LanguageCombobox({
                 <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-(--relay-tracking-wide) text-stone-400 group-data-selected:text-stone-300'>
                   {code.toUpperCase()}
                 </span>
-                <span>{LANGUAGE_NAMES[code] ?? code}</span>
+                <span>{targetLanguageName(code, i18n.language)}</span>
               </span>
               <Check
                 size={14}
@@ -124,10 +92,7 @@ export function LanguageCombobox({
               <span className='inline-block w-8 shrink-0 font-mono text-[11px] font-semibold tracking-(--relay-tracking-wide) text-stone-300'>
                 {trimmedQuery.slice(0, 3).toUpperCase()}
               </span>
-              <span>
-                Use custom language &quot;
-                <span className='text-stone-200'>{trimmedQuery}</span>&quot;
-              </span>
+              <span>{t('useCustom', { value: trimmedQuery })}</span>
             </ComboboxOption>
           ) : null}
         </ComboboxOptions>

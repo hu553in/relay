@@ -27,6 +27,7 @@ pub(crate) fn now_ms() -> u64 {
         .map(|value| value.as_millis() as u64)
         .unwrap_or_default()
 }
+use crate::domain::UserMessage;
 use app::RelayApp;
 use commands::{
     clear_diagnostics, clear_transcript_log, clear_translation_log, download_recommended_model,
@@ -281,7 +282,8 @@ fn configure_shortcuts(app: &tauri::AppHandle, relay: &RelayApp) {
         tracing::warn!("global shortcuts unavailable: {error:#}");
         let _ = relay.push_diagnostic(
             "warning",
-            format!("Global shortcuts unavailable: {error:#}"),
+            UserMessage::new("diagnostics:globalShortcutsUnavailable")
+                .param("error", format!("{error:#}")),
         );
     }
 }

@@ -11,5 +11,5 @@ pub(crate) mod tray {
 }
 
 pub(crate) mod app_menu {
-    pub(crate) const QUIT: &str = "app.quit";
+    pub(crate) const QUIT: &str = "relay.app.quit";
 }

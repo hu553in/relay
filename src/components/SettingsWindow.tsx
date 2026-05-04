@@ -1,10 +1,14 @@
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { getVersion } from '@tauri-apps/api/app';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
+import type { Namespace, TFunction } from 'i18next';
 import {
   AudioLines,
   Captions,
+  Check,
+  ChevronDown,
   ChevronRight,
   ContactRound,
   ExternalLink,
@@ -16,9 +20,11 @@ import {
   Languages,
   Logs,
   Mic,
+  Palette,
   SquareTerminal,
 } from 'lucide-react';
 import { type PropsWithChildren, type ReactNode, useEffect, useId, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { InputSourceStatusCard } from '@/components/InputSourceStatusCard';
 import { type LogEntry, SegmentLogPanel } from '@/components/SegmentLogPanel';
@@ -34,6 +40,8 @@ import { WindowDragStrip, WindowShell } from '@/components/shared/WindowChrome';
 import { ToastViewport } from '@/components/ToastViewport';
 import { useAppConstants } from '@/hooks/useAppConstants';
 import { useToastCenter } from '@/hooks/useToastCenter';
+import { normalizeUiLanguage, uiLanguages } from '@/i18n/languages';
+import { fallbackLanguage } from '@/i18n/resources';
 import { diagnosticLevelTone } from '@/lib/diagnostics';
 import { toErrorMessage } from '@/lib/errors';
 import {
@@ -50,17 +58,10 @@ import type {
   RelaySettings,
   RelaySnapshotState,
   ServiceHealth,
+  SettingsSection,
+  UserMessage,
 } from '@/lib/types';
-
-type SettingsSection =
-  | 'inputs'
-  | 'transcription'
-  | 'translation'
-  | 'overlay'
-  | 'shortcuts'
-  | 'logs'
-  | 'rawConfig'
-  | 'about';
+import { formatUserMessage } from '@/lib/userMessages';
 
 interface SectionDescriptor {
   id: SettingsSection;
@@ -69,57 +70,69 @@ interface SectionDescriptor {
   description: string;
 }
 
-const SECTION_ITEMS: SectionDescriptor[] = [
+const SECTION_ITEMS: Pick<SectionDescriptor, 'id' | 'icon'>[] = [
   {
     id: 'inputs',
-    label: 'Inputs',
     icon: <Mic size={14} />,
-    description: 'Audio capture sources configuration.',
   },
   {
     id: 'transcription',
-    label: 'Transcription',
     icon: <AudioLines size={14} />,
-    description: 'Transcription configuration.',
   },
   {
     id: 'translation',
-    label: 'Translation',
     icon: <Languages size={14} />,
-    description: 'Translation configuration.',
+  },
+  {
+    id: 'interface',
+    icon: <Palette size={14} />,
   },
   {
     id: 'overlay',
-    label: 'Overlay',
     icon: <Captions size={14} />,
-    description: 'Overlay window behavior options.',
   },
   {
     id: 'shortcuts',
-    label: 'Shortcuts',
     icon: <Keyboard size={14} />,
-    description: 'Key application functionality shortcuts.',
   },
-  { id: 'logs', label: 'Logs', icon: <Logs size={14} />, description: 'Application logs history.' },
+  { id: 'logs', icon: <Logs size={14} /> },
   {
     id: 'rawConfig',
-    label: 'Raw config',
     icon: <FileCode2 size={14} />,
-    description: 'Read-only preview of the configuration file.',
   },
   {
     id: 'about',
-    label: 'About',
     icon: <Info size={14} />,
-    description: 'Information about the application.',
   },
 ];
 
-const SECTION_BY_ID: Record<SettingsSection, SectionDescriptor> = Object.fromEntries(
-  SECTION_ITEMS.map(item => [item.id, item])
-) as Record<SettingsSection, SectionDescriptor>;
+function sectionDescriptor<Ns extends Namespace>(
+  id: SettingsSection,
+  icon: ReactNode,
+  t: TFunction<Ns>
+): SectionDescriptor {
+  const translate = t as unknown as (key: string) => string;
+  return {
+    id,
+    icon,
+    label: translate(`settings:sections.${id}.label`),
+    description: translate(`settings:sections.${id}.description`),
+  };
+}
 
 export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
+  const { t } = useTranslation([
+    'app',
+    'boot',
+    'common',
+    'controls',
+    'diagnostics',
+    'logs',
+    'models',
+    'runtime',
+    'settings',
+    'source',
+  ]);
   const snapshot = relay.snapshot;
   const [activeSection, setActiveSection] = useState<SettingsSection>('inputs');
   const [version, setVersion] = useState('0.1.0');
@@ -128,6 +141,18 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
   const [downloadingModelKind, setDownloadingModelKind] = useState<ModelKind | null>(null);
   const constants = useAppConstants();
   const { toasts, pushToast, dismissToast } = useToastCenter(snapshot?.diagnostics);
+  const sections = useMemo(
+    () => SECTION_ITEMS.map(item => sectionDescriptor(item.id, item.icon, t)),
+    [t]
+  );
+  const sectionById = useMemo(
+    () =>
+      Object.fromEntries(sections.map(item => [item.id, item])) as Record<
+        SettingsSection,
+        SectionDescriptor
+      >,
+    [sections]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -148,7 +173,8 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
     });
 
     void listen<string>(constants.settingsNavigateEvent, event => {
-      const nextSection = SECTION_ITEMS.find(item => item.id === event.payload)?.id ?? 'inputs';
+      const requested = event.payload;
+      const nextSection = SECTION_ITEMS.find(item => item.id === requested)?.id ?? 'inputs';
       setActiveSection(nextSection);
     }).then(cleanup => {
       if (mounted) {
@@ -203,18 +229,18 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
       [...(diagnostics ?? [])].reverse().map(entry => ({
         id: `diagnostic-${entry.id}`,
         timestampMs: entry.timestampMs,
-        text: entry.message,
+        text: formatUserMessage(entry.message, t) ?? '',
         tone: diagnosticLevelTone(entry.level),
       })),
-    [diagnostics]
+    [diagnostics, t]
   );
 
   if (relay.isLoading || !snapshot || !settings) {
-    return <WindowShell message={relay.error ?? 'Loading Relay settings...'} />;
+    return <WindowShell message={relay.error ?? t('boot:loadingSettings')} />;
   }
 
   const notifyError = (reason: unknown) => {
-    pushToast({ title: 'Relay', message: toErrorMessage(reason), tone: 'error' });
+    pushToast({ title: t('app:toastTitle'), message: toErrorMessage(reason), tone: 'error' });
   };
 
   const runWithErrorToast = async (action: () => Promise<unknown>) => {
@@ -287,7 +313,8 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
     }
   };
 
-  const active = SECTION_BY_ID[activeSection];
+  const active = sectionById[activeSection];
+  const fillsAvailableHeight = activeSection === 'logs' || activeSection === 'rawConfig';
 
   return (
     <main className='bg-(--relay-app-bg) flex h-screen w-screen flex-col overflow-hidden text-stone-100'>
@@ -295,12 +322,14 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
       <div className='flex min-h-0 flex-1'>
         <aside className='flex h-full w-52 shrink-0 flex-col border-r border-white/6 bg-[rgba(15,15,14,0.82)] px-2.5 pb-3 pt-3'>
           <div className='rounded-xl border border-white/8 bg-white/[0.035] px-3 py-2.5'>
-            <p className='text-[12.5px] font-semibold text-white'>Settings</p>
-            <p className='mt-0.5 text-[10.5px] text-stone-500'>Relay v{version}</p>
+            <p className='text-[12.5px] font-semibold text-white'>{t('settings:title')}</p>
+            <p className='mt-0.5 text-[10.5px] text-stone-500'>
+              {t('settings:version', { version })}
+            </p>
           </div>
 
           <nav className='relay-scroll mt-2.5 grid gap-0.5 overflow-y-auto pr-1'>
-            {SECTION_ITEMS.map(item => (
+            {sections.map(item => (
               <NavButton
                 key={item.id}
                 label={item.label}
@@ -314,7 +343,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
           </nav>
         </aside>
 
-        <section className='relay-scroll flex-1 overflow-y-auto'>
+        <section className='flex min-h-0 flex-1 flex-col overflow-hidden'>
           <div className='sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-white/6 bg-[rgba(31,31,29,0.96)] px-5 py-3'>
             <div>
               <h1 className='text-[17px] font-semibold text-white'>{active.label}</h1>
@@ -322,18 +351,24 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             </div>
           </div>
 
-          <div className='mx-auto w-full max-w-230 px-5 py-4'>
+          <div
+            className={`relay-scroll mx-auto w-full min-h-0 flex-1 px-5 py-4 ${
+              fillsAvailableHeight
+                ? 'flex min-h-0 max-w-none flex-1 flex-col overflow-hidden'
+                : 'max-w-230 overflow-y-auto'
+            }`}
+          >
             {activeSection === 'inputs' ? (
               <SectionGrid cols={2}>
                 <InputSourceStatusCard
-                  title='Microphone'
+                  title={t('controls:microphone')}
                   source={snapshot.microphone}
                   onToggle={enabled => {
                     void applySettings({ ...settings, microphoneEnabled: enabled });
                   }}
                 />
                 <InputSourceStatusCard
-                  title='System audio'
+                  title={t('controls:systemAudio')}
                   source={snapshot.systemAudio}
                   onToggle={enabled => {
                     void applySettings({ ...settings, systemAudioEnabled: enabled });
@@ -345,14 +380,17 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             {activeSection === 'transcription' ? (
               <SectionGrid>
                 <SectionCard
-                  title='Transcription model'
-                  description='Set the root directory, then choose a model from the list.'
+                  title={t('settings:transcription.modelTitle')}
+                  description={t('settings:transcription.modelDescription')}
                   action={<HealthBadge health={snapshot.sttHealth} />}
                 >
                   <HealthMessage health={snapshot.sttHealth} detail={snapshot.sttDetail} />
                   <Field
-                    label='Whisper models directory'
-                    hint={`App scans this folder and all subfolders (up to ${String(constants.maxModelWalkDepth)} levels deep) for ${constants.whisperModelExtensions.map(e => `.${e}`).join(', ')} files. Symlink loops are skipped automatically. Press Enter or click away to save manual edits.`}
+                    label={t('settings:transcription.modelsDirectory')}
+                    hint={t('settings:transcription.modelsDirectoryHint', {
+                      depth: String(constants.maxModelWalkDepth),
+                      extensions: formatExtensions(constants.whisperModelExtensions),
+                    })}
                   >
                     <PathInputField
                       value={settings.sttModelPath}
@@ -370,7 +408,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       onBrowse={() => void pickModelDirectory('transcription')}
                     />
                   </Field>
-                  <Field label='Models'>
+                  <Field label={t('models:models')}>
                     <ModelsList
                       kind='transcription'
                       models={transcriptionModels}
@@ -380,8 +418,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='Whisper CPU threads'
-                    hint={`Threads used by Whisper (${String(constants.minWorkerThreads)} to ${String(constants.maxWorkerThreads)}). Higher can transcribe faster until CPU contention or heat dominates.`}
+                    label={t('settings:transcription.threads')}
+                    hint={t('settings:transcription.threadsHint', {
+                      min: String(constants.minWorkerThreads),
+                      max: String(constants.maxWorkerThreads),
+                    })}
                   >
                     <IntegerSettingField
                       value={settings.sttThreads}
@@ -394,8 +435,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='Audio window'
-                    hint={`Seconds per Whisper decode (${String(constants.minTranscriptionWindowSeconds)} to ${String(constants.maxTranscriptionWindowSeconds)}). Lower reduces latency; higher gives more speech context.`}
+                    label={t('settings:transcription.window')}
+                    hint={t('settings:transcription.windowHint', {
+                      min: String(constants.minTranscriptionWindowSeconds),
+                      max: String(constants.maxTranscriptionWindowSeconds),
+                    })}
                   >
                     <IntegerSettingField
                       value={settings.sttWindowSeconds}
@@ -408,8 +452,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='Audio hop'
-                    hint={`Seconds between overlapping decodes (${String(constants.minTranscriptionHopSeconds)} to ${String(constants.maxTranscriptionHopSeconds)}). Lower updates more often and costs more CPU.`}
+                    label={t('settings:transcription.hop')}
+                    hint={t('settings:transcription.hopHint', {
+                      min: String(constants.minTranscriptionHopSeconds),
+                      max: String(constants.maxTranscriptionHopSeconds),
+                    })}
                   >
                     <IntegerSettingField
                       value={settings.sttHopSeconds}
@@ -422,8 +469,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='Sentence timeout'
-                    hint={`Milliseconds before a partial sentence is emitted (${String(constants.minTranscriptionSentenceTimeoutMs)} to ${String(constants.maxTranscriptionSentenceTimeoutMs)}). Lower feels faster; higher waits for cleaner sentence boundaries.`}
+                    label={t('settings:transcription.sentenceTimeout')}
+                    hint={t('settings:transcription.sentenceTimeoutHint', {
+                      min: String(constants.minTranscriptionSentenceTimeoutMs),
+                      max: String(constants.maxTranscriptionSentenceTimeoutMs),
+                    })}
                   >
                     <IntegerSettingField
                       value={settings.sttSentenceTimeoutMs}
@@ -436,13 +486,12 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <InlineNote>
-                    Whisper GGML *.{constants.whisperModelExtensions.join(', *.')} models are
-                    supported here. Multilingual models cover many languages. English-only variants
-                    (with &quot;en&quot; in name) are faster, but they will not handle mixed or
-                    non-English speech.
+                    {t('settings:transcription.note', {
+                      extensions: formatGlobExtensions(constants.whisperModelExtensions),
+                    })}
                   </InlineNote>
                   <BrowseLinkRow
-                    label='Browse Whisper transcription models on Hugging Face'
+                    label={t('settings:transcription.browseModels')}
                     onClick={() => {
                       void openUrl('https://huggingface.co/ggerganov/whisper.cpp/tree/main');
                     }}
@@ -455,8 +504,8 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             {activeSection === 'translation' ? (
               <SectionGrid>
                 <SectionCard
-                  title='Translation model'
-                  description='Set the root directory, then choose a model from the list.'
+                  title={t('settings:translation.modelTitle')}
+                  description={t('settings:translation.modelDescription')}
                   action={<HealthBadge health={snapshot.translationHealth} />}
                 >
                   <HealthMessage
@@ -464,8 +513,8 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     detail={snapshot.translationDetail}
                   />
                   <Field
-                    label='Target language'
-                    hint='Use an ISO code like de or ja, or type a custom language name such as Brazilian Portuguese.'
+                    label={t('settings:translation.targetLanguage')}
+                    hint={t('settings:translation.targetLanguageHint')}
                   >
                     <LanguageCombobox
                       value={settings.translation.targetLanguage}
@@ -478,8 +527,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='Translation models directory'
-                    hint={`App scans this folder and all subfolders (up to ${String(constants.maxModelWalkDepth)} levels deep) for ${constants.translationModelExtensions.map(e => `.${e}`).join(', ')} files. Symlink loops are skipped automatically. Press Enter or click away to save manual edits.`}
+                    label={t('settings:translation.modelsDirectory')}
+                    hint={t('settings:translation.modelsDirectoryHint', {
+                      depth: String(constants.maxModelWalkDepth),
+                      extensions: formatExtensions(constants.translationModelExtensions),
+                    })}
                   >
                     <PathInputField
                       value={settings.translation.modelPath}
@@ -500,7 +552,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       onBrowse={() => void pickModelDirectory('translation')}
                     />
                   </Field>
-                  <Field label='Models'>
+                  <Field label={t('models:models')}>
                     <ModelsList
                       kind='translation'
                       models={translationModels}
@@ -510,8 +562,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='Max tokens'
-                    hint={`Max generated translation tokens per segment (${String(constants.minGenerationTokens)} to ${String(constants.maxGenerationTokens)}). Lower is faster. Higher helps longer sentences. Values outside this range are clamped.`}
+                    label={t('settings:translation.maxTokens')}
+                    hint={t('settings:translation.maxTokensHint', {
+                      min: String(constants.minGenerationTokens),
+                      max: String(constants.maxGenerationTokens),
+                    })}
                   >
                     <MaxTokensField
                       value={settings.translation.maxTokens}
@@ -524,8 +579,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='Context tokens'
-                    hint={`llama.cpp context window (${String(constants.minTranslationContextTokens)} to ${String(constants.maxTranslationContextTokens)}). Higher fits longer prompts and outputs but uses more memory.`}
+                    label={t('settings:translation.contextTokens')}
+                    hint={t('settings:translation.contextTokensHint', {
+                      min: String(constants.minTranslationContextTokens),
+                      max: String(constants.maxTranslationContextTokens),
+                    })}
                   >
                     <IntegerSettingField
                       value={settings.translation.contextTokens}
@@ -541,8 +599,11 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   </Field>
                   <Field
-                    label='llama.cpp CPU threads'
-                    hint={`Threads used by translation (${String(constants.minWorkerThreads)} to ${String(constants.maxWorkerThreads)}). Higher can be faster until CPU contention or heat dominates.`}
+                    label={t('settings:translation.threads')}
+                    hint={t('settings:translation.threadsHint', {
+                      min: String(constants.minWorkerThreads),
+                      max: String(constants.maxWorkerThreads),
+                    })}
                   >
                     <IntegerSettingField
                       value={settings.translation.threads}
@@ -557,14 +618,9 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                       }}
                     />
                   </Field>
-                  <InlineNote>
-                    Use llama.cpp-compatible instruct or chat GGUF models. The Hugging Face filter
-                    below is a good starting point, but every result still needs a chat template and
-                    practical translation quality. Sampling is greedy in the current runtime, so
-                    there is no temperature setting to tune.
-                  </InlineNote>
+                  <InlineNote>{t('settings:translation.note')}</InlineNote>
                   <BrowseLinkRow
-                    label='Browse translation model candidates on Hugging Face'
+                    label={t('settings:translation.browseModels')}
                     onClick={() => {
                       void openUrl(
                         'https://huggingface.co/models?pipeline_tag=translation&library=gguf&apps=llama.cpp'
@@ -579,26 +635,27 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             {activeSection === 'shortcuts' ? (
               <SectionGrid>
                 <SectionCard
-                  title='Global shortcuts'
+                  title={t('settings:shortcuts.title')}
                   description={
                     <>
-                      Edit shortcut text, then press Enter or click away to save. Use modifiers and
-                      keys joined with &quot;+&quot;, for example CmdOrCtrl+Shift+L.{' '}
+                      {t('settings:shortcuts.descriptionPrefix')}{' '}
                       <button
                         type='button'
-                        className='text-stone-200 underline decoration-white/20 underline-offset-3 transition hover:text-white hover:decoration-white/45'
+                        className='text-stone-200 underline decoration-white/20 underline-offset-3 transition hover:text-white hover:decoration-white/45 cursor-pointer'
                         onClick={() => {
-                          void openUrl('https://tauri.app/reference/javascript/global-shortcut/');
+                          void openUrl(
+                            'https://github.com/tauri-apps/global-hotkey/blob/dev/src/hotkey.rs'
+                          );
                         }}
                       >
-                        Tauri shortcut syntax
+                        {t('settings:shortcuts.syntaxLink')}
                       </button>
                       .
                     </>
                   }
                 >
                   <ShortcutRow
-                    label='Toggle listening'
+                    label={t('settings:shortcuts.toggleListening')}
                     value={settings.shortcuts.toggleListening}
                     onCommit={value => {
                       void applySettings({
@@ -608,7 +665,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     }}
                   />
                   <ShortcutRow
-                    label='Show / hide overlay'
+                    label={t('settings:shortcuts.toggleOverlay')}
                     value={settings.shortcuts.toggleOverlay}
                     onCommit={value => {
                       void applySettings({
@@ -621,10 +678,10 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     <div className='grid gap-2'>
                       {snapshot.shortcutWarnings.map(warning => (
                         <div
-                          key={warning}
+                          key={`${warning.code}-${JSON.stringify(warning.params ?? {})}`}
                           className='rounded-xl border border-amber-400/20 bg-amber-400/10 px-3 py-2.5 text-[12px] leading-5 text-amber-100'
                         >
-                          {warning}
+                          {formatUserMessage(warning, t)}
                         </div>
                       ))}
                     </div>
@@ -633,11 +690,30 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
               </SectionGrid>
             ) : null}
 
+            {activeSection === 'interface' ? (
+              <SectionGrid>
+                <SectionCard
+                  title={t('settings:interface.uiLanguage')}
+                  description={t('settings:interface.uiLanguageHint')}
+                >
+                  <UiLanguageSelect
+                    value={normalizeUiLanguage(settings.interface.uiLanguage)}
+                    onChange={value => {
+                      void applySettings({
+                        ...settings,
+                        interface: { ...settings.interface, uiLanguage: value },
+                      });
+                    }}
+                  />
+                </SectionCard>
+              </SectionGrid>
+            ) : null}
+
             {activeSection === 'overlay' ? (
               <SectionGrid>
                 <ToggleRow
-                  label='Always on top'
-                  detail='Keep the overlay above other windows while it is visible.'
+                  label={t('settings:overlay.alwaysOnTop')}
+                  detail={t('settings:overlay.alwaysOnTopDetail')}
                   checked={settings.overlay.alwaysOnTop}
                   onChange={checked => {
                     void applySettings({
@@ -650,62 +726,61 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
             ) : null}
 
             {activeSection === 'logs' ? (
-              <SectionGrid>
-                <div className='min-h-155'>
-                  <SegmentLogPanel
-                    title='Diagnostics'
-                    icon={<SquareTerminal size={16} />}
-                    entries={diagnosticsEntries}
-                    onCopyError={notifyError}
-                    actions={
-                      <>
-                        <IconButton
-                          label='Open log folder'
-                          icon={<FolderOpen size={14} />}
-                          onClick={() => {
-                            if (appPaths?.diagnosticsLogFile) {
-                              void runWithErrorToast(() =>
-                                revealItemInDir(appPaths.diagnosticsLogFile)
-                              );
-                            }
-                          }}
-                        />
-                        <ClearLogButton
-                          label='Clear diagnostics log'
-                          disabled={diagnosticsEntries.length === 0}
-                          onClick={() => {
-                            void clearDiagnostics()
-                              .then(() => {
-                                pushToast({
-                                  title: 'Relay',
-                                  message: 'Diagnostics cleared',
-                                  tone: 'success',
-                                });
-                              })
-                              .catch(notifyError);
-                          }}
-                        />
-                      </>
-                    }
-                    footer={
-                      <div className='flex w-full items-center justify-between gap-3'>
-                        <span>{diagnosticsEntries.length} lines</span>
-                        <span>{appPaths?.diagnosticsLogFile ?? 'Log file unavailable'}</span>
-                      </div>
-                    }
-                    emptyText='Waiting for diagnostic events.'
-                  />
-                </div>
+              <SectionGrid fill>
+                <SegmentLogPanel
+                  title={t('logs:diagnostics')}
+                  icon={<SquareTerminal size={16} />}
+                  entries={diagnosticsEntries}
+                  onCopyError={notifyError}
+                  actions={
+                    <>
+                      <IconButton
+                        label={t('logs:openLogFolder')}
+                        icon={<FolderOpen size={14} />}
+                        onClick={() => {
+                          if (appPaths?.diagnosticsLogFile) {
+                            void runWithErrorToast(() =>
+                              revealItemInDir(appPaths.diagnosticsLogFile)
+                            );
+                          }
+                        }}
+                      />
+                      <ClearLogButton
+                        label={t('logs:clearDiagnostics')}
+                        disabled={diagnosticsEntries.length === 0}
+                        onClick={() => {
+                          void clearDiagnostics()
+                            .then(() => {
+                              pushToast({
+                                title: t('app:toastTitle'),
+                                message: t('logs:diagnosticsCleared'),
+                                tone: 'success',
+                              });
+                            })
+                            .catch(notifyError);
+                        }}
+                      />
+                    </>
+                  }
+                  footer={
+                    <div className='flex w-full items-center justify-between gap-3'>
+                      <span>{t('common:lineCount', { count: diagnosticsEntries.length })}</span>
+                      <span>{appPaths?.diagnosticsLogFile ?? t('logs:logFileUnavailable')}</span>
+                    </div>
+                  }
+                  emptyText={t('logs:emptyDiagnostics')}
+                />
               </SectionGrid>
             ) : null}
 
             {activeSection === 'rawConfig' ? (
-              <SectionGrid>
+              <SectionGrid fill>
                 <SectionCard
-                  title='Raw config'
+                  title={t('settings:rawConfig.title')}
+                  fill
                   action={
                     <IconButton
-                      label='Open config folder'
+                      label={t('settings:rawConfig.openFolder')}
                       icon={<FolderOpen size={14} />}
                       onClick={() => {
                         if (appPaths?.configFile) {
@@ -715,16 +790,16 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                     />
                   }
                 >
-                  <TomlPreview content={configPreview || 'Unable to load config preview.'} />
+                  <TomlPreview content={configPreview || t('settings:rawConfig.loadFailed')} />
                 </SectionCard>
               </SectionGrid>
             ) : null}
 
             {activeSection === 'about' ? (
               <SectionGrid>
-                <LabeledInfoRow label='Version' value={version} />
+                <LabeledInfoRow label={t('settings:about.version')} value={version} />
                 <LabeledInfoRow
-                  label='Developer'
+                  label={t('settings:about.developer')}
                   value='Ruslan Khasanshin <r.m.khasanshin@gmail.com>'
                   onClick={() => {
                     void openUrl('mailto:r.m.khasanshin@gmail.com');
@@ -732,7 +807,7 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
                   icon={<ContactRound size={14} />}
                 />
                 <LabeledInfoRow
-                  label='Website'
+                  label={t('settings:about.website')}
                   value='hu553in.su'
                   onClick={() => {
                     void openUrl('https://hu553in.su');
@@ -781,18 +856,40 @@ function NavButton({
   );
 }
 
-function SectionGrid({ cols = 1, children }: PropsWithChildren<{ cols?: 1 | 2 }>) {
-  return <div className={`grid gap-2.5 ${cols === 2 ? 'lg:grid-cols-2' : ''}`}>{children}</div>;
+function SectionGrid({
+  cols = 1,
+  fill = false,
+  children,
+}: PropsWithChildren<{ cols?: 1 | 2; fill?: boolean }>) {
+  return (
+    <div
+      className={`grid gap-2.5 ${
+        cols === 2 ? 'lg:grid-cols-2' : ''
+      } ${fill ? 'h-full min-h-0 flex-1' : ''}`}
+    >
+      {children}
+    </div>
+  );
 }
 
 function SectionCard({
   title,
   description,
   action,
+  fill = false,
   children,
-}: PropsWithChildren<{ title: string; description?: ReactNode; action?: ReactNode }>) {
+}: PropsWithChildren<{
+  title: string;
+  description?: ReactNode;
+  action?: ReactNode;
+  fill?: boolean;
+}>) {
   return (
-    <section className='rounded-xl border border-white/6 bg-(--relay-card-bg) p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)]'>
+    <section
+      className={`rounded-xl border border-white/6 bg-(--relay-card-bg) p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)] ${
+        fill ? 'flex h-full min-h-0 flex-1 flex-col' : ''
+      }`}
+    >
       <div className='mb-2.5 flex items-start justify-between gap-3'>
         <div>
           <h2 className='text-[13px] font-medium text-white'>{title}</h2>
@@ -802,7 +899,7 @@ function SectionCard({
         </div>
         {action}
       </div>
-      <div className='grid gap-2.5'>{children}</div>
+      <div className={`grid gap-2.5 ${fill ? 'min-h-0 flex-1' : ''}`}>{children}</div>
     </section>
   );
 }
@@ -846,8 +943,10 @@ function ToggleRow({
   );
 }
 
-function HealthMessage({ health, detail }: { health: ServiceHealth; detail: string | null }) {
-  if (!detail) return null;
+function HealthMessage({ health, detail }: { health: ServiceHealth; detail: UserMessage | null }) {
+  const { t } = useTranslation(['diagnostics', 'runtime', 'source']);
+  const text = formatUserMessage(detail, t);
+  if (!text) return null;
   const tone =
     health === 'ready'
       ? 'border-emerald-500/15 bg-emerald-500/8 text-emerald-200'
@@ -855,7 +954,7 @@ function HealthMessage({ health, detail }: { health: ServiceHealth; detail: stri
         ? 'border-rose-500/20 bg-rose-500/10 text-rose-100'
         : 'border-white/8 bg-white/[0.02] text-stone-300';
   return (
-    <div className={`rounded-lg border px-2.5 py-2 text-[11.5px] leading-5 ${tone}`}>{detail}</div>
+    <div className={`rounded-lg border px-2.5 py-2 text-[11.5px] leading-5 ${tone}`}>{text}</div>
   );
 }
 
@@ -868,11 +967,88 @@ function ShortcutRow({
   value: string;
   onCommit: (next: string) => void;
 }) {
+  const { t } = useTranslation('settings');
   return (
     <div className='flex items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/2 px-3 py-3'>
       <span className='text-[13px] text-stone-200'>{label}</span>
-      <ShortcutInputField value={value} label={`${label} shortcut`} onCommit={onCommit} />
+      <ShortcutInputField
+        value={value}
+        label={t('shortcuts.shortcutAria', { label })}
+        onCommit={onCommit}
+      />
     </div>
+  );
+}
+
+function UiLanguageSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const selected = uiLanguages.find(language => language.code === value) ??
+    uiLanguages.find(language => language.code === fallbackLanguage) ??
+    uiLanguages[0] ?? {
+      code: 'en',
+      label: 'English',
+      nativeLabel: 'English',
+    };
+
+  return (
+    <Listbox
+      value={value}
+      onChange={next => {
+        if (typeof next === 'string') onChange(normalizeUiLanguage(next));
+      }}
+    >
+      <div className='relative'>
+        <ListboxButton className='flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/2 px-3 py-2.5 text-left text-[12px] text-stone-100 outline-none transition hover:border-white/12 hover:bg-white/8 focus:border-stone-300/45'>
+          <span className='flex min-w-0 items-center gap-2.5'>
+            <LanguageBadge code={selected.code} />
+            <span className='min-w-0 truncate'>{selected.label}</span>
+            {selected.nativeLabel !== selected.label ? (
+              <span className='truncate text-stone-500'>{selected.nativeLabel}</span>
+            ) : null}
+          </span>
+          <ChevronDown size={16} className='shrink-0 text-stone-400' />
+        </ListboxButton>
+        <ListboxOptions
+          anchor='bottom start'
+          className='relay-scroll z-20 mt-1 max-h-72 w-(--button-width) overflow-y-auto rounded-xl border border-white/8 bg-[rgba(24,24,22,0.96)] p-1 shadow-[0_18px_60px_rgba(0,0,0,0.4)] backdrop-blur-2xl'
+        >
+          {uiLanguages.map(language => (
+            <ListboxOption
+              key={language.code}
+              value={language.code}
+              className='group flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-[13px] text-stone-200 transition data-focus:bg-white/10 data-selected:bg-white/6 data-selected:text-stone-100'
+            >
+              <span className='flex min-w-0 items-center gap-2.5'>
+                <LanguageBadge code={language.code} />
+                <span className='min-w-0 truncate'>{language.label}</span>
+                {language.nativeLabel !== language.label ? (
+                  <span className='truncate text-[12px] text-stone-500'>
+                    {language.nativeLabel}
+                  </span>
+                ) : null}
+              </span>
+              <Check
+                size={14}
+                className='shrink-0 text-stone-300 opacity-0 group-data-selected:opacity-100'
+              />
+            </ListboxOption>
+          ))}
+        </ListboxOptions>
+      </div>
+    </Listbox>
+  );
+}
+
+function LanguageBadge({ code }: { code: string }) {
+  return (
+    <span className='inline-flex h-5 min-w-8 shrink-0 items-center justify-center rounded-md border border-white/8 bg-white/6 px-1.5 font-mono text-[10px] font-semibold text-stone-300'>
+      {code.toUpperCase()}
+    </span>
   );
 }
 
@@ -949,10 +1125,13 @@ function InlineNote({ children }: PropsWithChildren) {
 }
 
 function TomlPreview({ content }: { content: string }) {
+  const normalizedContent = content.replace(/\n+$/, '');
+  const lines = normalizedContent.length > 0 ? normalizedContent.split('\n') : [];
+
   return (
-    <pre className='relay-scroll max-h-120 overflow-auto rounded-xl border border-white/8 bg-black/24 px-3.5 py-3 font-mono text-[11.5px] leading-5 text-stone-300'>
+    <pre className='relay-scroll h-full min-h-0 flex-1 overflow-auto rounded-xl border border-white/8 bg-black/24 px-3.5 py-3 font-mono text-[11.5px] leading-5 text-stone-300'>
       <code>
-        {content.split('\n').map((line, index) => (
+        {lines.map((line, index) => (
           <span key={`${String(index)}-${line}`} className='block'>
             {renderTomlLine(line)}
           </span>
@@ -960,6 +1139,14 @@ function TomlPreview({ content }: { content: string }) {
       </code>
     </pre>
   );
+}
+
+function formatExtensions(extensions: string[]): string {
+  return extensions.map(extension => `.${extension}`).join(', ');
+}
+
+function formatGlobExtensions(extensions: string[]): string {
+  return extensions.map(extension => `*.${extension}`).join(', ');
 }
 
 function renderTomlLine(line: string) {

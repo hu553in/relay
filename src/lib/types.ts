@@ -19,6 +19,7 @@ export interface AppConstants {
   minTranscriptionSentenceTimeoutMs: number;
   maxTranscriptionSentenceTimeoutMs: number;
   defaultTargetLanguage: string;
+  defaultUiLanguage: string;
   defaultToggleListeningShortcut: string;
   defaultToggleOverlayShortcut: string;
   maxModelWalkDepth: number;
@@ -37,6 +38,16 @@ export type ServiceHealth = 'unknown' | 'ready' | 'degraded' | 'unavailable';
 export type SegmentStatus = 'transcribed' | 'translating' | 'translated' | 'translationFailed';
 export type ModelKind = 'transcription' | 'translation';
 export type ModelState = 'active' | 'available' | 'missing';
+export type SettingsSection =
+  | 'inputs'
+  | 'transcription'
+  | 'translation'
+  | 'interface'
+  | 'overlay'
+  | 'shortcuts'
+  | 'logs'
+  | 'rawConfig'
+  | 'about';
 
 export interface SourceState {
   enabled: boolean;
@@ -44,7 +55,12 @@ export interface SourceState {
   capturing: boolean;
   health: ServiceHealth;
   inputLevel: number | null;
-  detail: string | null;
+  detail: UserMessage | null;
+}
+
+export interface UserMessage {
+  code: string;
+  params?: Record<string, string> | undefined;
 }
 
 export interface ModelRecord {
@@ -77,6 +93,10 @@ export interface OverlaySettings {
   alwaysOnTop: boolean;
 }
 
+export interface InterfaceSettings {
+  uiLanguage: string;
+}
+
 export interface RelaySettings {
   microphoneEnabled: boolean;
   systemAudioEnabled: boolean;
@@ -88,6 +108,7 @@ export interface RelaySettings {
   sttSentenceTimeoutMs: number;
   translation: TranslationSettings;
   overlay: OverlaySettings;
+  interface: InterfaceSettings;
   shortcuts: ShortcutSettings;
 }
 
@@ -95,7 +116,7 @@ export interface DiagnosticsEntry {
   id: string;
   timestampMs: number;
   level: string;
-  message: string;
+  message: UserMessage;
 }
 
 export interface SegmentRecord {
@@ -110,13 +131,13 @@ export interface SegmentRecord {
 export interface AppSnapshot {
   listeningState: ListeningState;
   settings: RelaySettings;
-  shortcutWarnings: string[];
+  shortcutWarnings: UserMessage[];
   microphone: SourceState;
   systemAudio: SourceState;
   sttHealth: ServiceHealth;
-  sttDetail: string | null;
+  sttDetail: UserMessage | null;
   translationHealth: ServiceHealth;
-  translationDetail: string | null;
+  translationDetail: UserMessage | null;
   activeSessionId: string | null;
   sessionStartedAtMs: number | null;
   sessionSegmentCount: number;

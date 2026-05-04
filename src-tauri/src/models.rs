@@ -10,7 +10,9 @@ use uuid::Uuid;
 use crate::constants::{
     MAX_MODEL_WALK_DEPTH, TRANSLATION_MODEL_EXTENSIONS, WHISPER_MODEL_EXTENSIONS,
 };
-use crate::domain::{normalize_model_reference, ModelKind, ModelRecord, ModelState, RelaySettings};
+use crate::domain::{
+    normalize_model_reference, ModelKind, ModelRecord, ModelState, RelaySettings, UserMessage,
+};
 use crate::recommended_models::{
     model_references_equal, recommended_model, recommended_model_by_reference,
 };
@@ -34,31 +36,33 @@ pub(crate) fn collect_models(settings: &RelaySettings) -> Vec<ModelRecord> {
     candidates.into_values().collect()
 }
 
-pub(crate) fn validate_model_directory(path: &str, label: &str) -> Result<(), String> {
+pub(crate) fn validate_model_directory(path: &str, label: &str) -> Result<(), UserMessage> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
-        return Err(format!("{label} model directory is empty"));
+        return Err(UserMessage::new("runtime:modelDirectoryEmpty").param("label", label));
     }
 
     let path = Path::new(trimmed);
     if !path.exists() {
-        return Err(format!(
-            "{label} model directory is missing at {}",
-            path.display()
-        ));
+        return Err(UserMessage::new("runtime:modelDirectoryMissing")
+            .param("label", label)
+            .param("path", path.display()));
     }
 
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("{label} model directory is unavailable: {error}"))?;
+    let metadata = fs::metadata(path).map_err(|error| {
+        UserMessage::new("runtime:modelDirectoryUnavailable")
+            .param("label", label)
+            .param("error", error)
+    })?;
     if !metadata.is_dir() {
-        return Err(format!("{label} model directory must point to a folder"));
+        return Err(UserMessage::new("runtime:modelDirectoryMustBeFolder").param("label", label));
     }
 
     fs::read_dir(path).map_err(|error| {
-        format!(
-            "{label} model directory cannot be read at {}: {error}",
-            path.display()
-        )
+        UserMessage::new("runtime:modelDirectoryCannotBeRead")
+            .param("label", label)
+            .param("path", path.display())
+            .param("error", error)
     })?;
 
     Ok(())

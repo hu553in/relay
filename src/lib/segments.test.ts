@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { buildSegmentLogs, translationText } from '@/lib/segments';
 import type { SegmentRecord } from '@/lib/types';
 
+const text = {
+  translationFailed: 'Translation failed',
+  translationPending: 'Waiting for translation',
+  translationUnavailable: 'Translation unavailable',
+};
+
 function segment(overrides: Partial<SegmentRecord>): SegmentRecord {
   return {
     id: 'segment',
@@ -28,6 +34,7 @@ describe('buildSegmentLogs', () => {
         maxRows: 2,
         transcriptClearedAtMs: null,
         translationClearedAtMs: null,
+        text,
       }
     );
 
@@ -67,6 +74,7 @@ describe('buildSegmentLogs', () => {
         idPrefix: '',
         transcriptClearedAtMs: 15,
         translationClearedAtMs: 25,
+        text,
       }
     );
 
@@ -80,11 +88,23 @@ describe('buildSegmentLogs', () => {
 
 describe('translationText', () => {
   it('uses explicit failure text only when no translation payload exists', () => {
-    expect(translationText({ translation: null, status: 'translationFailed' })).toBe(
+    expect(translationText({ translation: null, status: 'translationFailed' }, text)).toBe(
       'Translation failed'
     );
     expect(
-      translationText({ translation: 'backend failure text', status: 'translationFailed' })
+      translationText({ translation: 'backend failure text', status: 'translationFailed' }, text)
     ).toBe('backend failure text');
+  });
+
+  it('marks completed rows without translation payload as unavailable', () => {
+    expect(translationText({ translation: null, status: 'translated' }, text)).toBe(
+      'Translation unavailable'
+    );
+    expect(translationText({ translation: null, status: 'transcribed' }, text)).toBe(
+      'Translation unavailable'
+    );
+    expect(translationText({ translation: null, status: 'translating' }, text)).toBe(
+      'Waiting for translation'
+    );
   });
 });

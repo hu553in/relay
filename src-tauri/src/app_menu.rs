@@ -118,9 +118,10 @@ mod tests {
     use crate::ids;
 
     #[test]
-    fn app_menu_quit_id_is_reserved_for_graceful_exit() {
-        assert_eq!(ids::app_menu::QUIT, "app.quit");
+    fn app_menu_quit_id_is_custom_for_graceful_exit() {
+        assert_eq!(ids::app_menu::QUIT, "relay.app.quit");
         assert!(is_quit_menu_id(ids::app_menu::QUIT));
+        assert_ne!(ids::app_menu::QUIT, "app.quit");
         assert_ne!(ids::app_menu::QUIT, ids::tray::QUIT);
     }
 

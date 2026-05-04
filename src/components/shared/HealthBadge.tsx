@@ -1,12 +1,7 @@
+import { useTranslation } from 'react-i18next';
+
 import { Badge, type BadgeTone } from '@/components/shared/Badge';
 import type { ServiceHealth } from '@/lib/types';
-
-const HEALTH_LABELS: Record<ServiceHealth, string> = {
-  ready: 'Ready',
-  degraded: 'Degraded',
-  unavailable: 'Unavailable',
-  unknown: 'Unknown',
-};
 
 function healthTone(health: ServiceHealth): BadgeTone {
   if (health === 'ready') {
@@ -19,5 +14,13 @@ function healthTone(health: ServiceHealth): BadgeTone {
 }
 
 export function HealthBadge({ health }: { health: ServiceHealth }) {
-  return <Badge tone={healthTone(health)}>{HEALTH_LABELS[health]}</Badge>;
+  const { t } = useTranslation('common');
+  const labels: Record<ServiceHealth, string> = {
+    ready: t('ready'),
+    degraded: t('degraded'),
+    unavailable: t('unavailable'),
+    unknown: t('unknown'),
+  };
+
+  return <Badge tone={healthTone(health)}>{labels[health]}</Badge>;
 }

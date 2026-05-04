@@ -7,7 +7,7 @@ use std::sync::{
 use tokio::sync::mpsc;
 
 use crate::audio::{fold_to_mono, RawAudioChunk};
-use crate::domain::InputSource;
+use crate::domain::{InputSource, UserMessage};
 
 use super::super::AudioErrorCallback;
 
@@ -33,7 +33,7 @@ pub(super) fn read_capture_stdout(
                 if !stop_requested.load(Ordering::Acquire) {
                     on_error(
                         InputSource::SystemAudio,
-                        "System audio capture stopped unexpectedly".to_string(),
+                        UserMessage::new("diagnostics:audioCaptureStopped"),
                     );
                 }
                 break;
@@ -65,7 +65,7 @@ pub(super) fn read_capture_stdout(
             Err(error) => {
                 on_error(
                     InputSource::SystemAudio,
-                    format!("System audio reader failed: {error}"),
+                    UserMessage::new("diagnostics:audioReaderFailed").param("error", error),
                 );
                 break;
             }
@@ -137,8 +137,13 @@ mod tests {
         assert_eq!(chunk.samples, vec![0.0, 0.5]);
         assert!(rx.try_recv().is_err());
         assert_eq!(
-            errors.lock().unwrap().as_slice(),
-            ["System audio capture stopped unexpectedly"]
+            errors
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|message| message.code.as_str())
+                .collect::<Vec<_>>(),
+            ["diagnostics:audioCaptureStopped"]
         );
     }
 
@@ -160,7 +165,8 @@ mod tests {
         let errors = errors.lock().unwrap();
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].0, InputSource::SystemAudio);
-        assert!(errors[0].1.contains("reader failed"));
+        assert_eq!(errors[0].1.code, "diagnostics:audioReaderFailed");
+        assert!(errors[0].1.params["error"].contains("boom"));
     }
 
     #[test]

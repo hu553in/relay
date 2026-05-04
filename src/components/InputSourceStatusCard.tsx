@@ -1,16 +1,11 @@
+import { useTranslation } from 'react-i18next';
+
 import { Badge, type BadgeTone } from '@/components/shared/Badge';
 import { Switch } from '@/components/shared/Switch';
 import type { SourceState } from '@/lib/types';
+import { formatUserMessage } from '@/lib/userMessages';
 
 type SourceStatusKey = 'disabled' | 'unavailable' | 'error' | 'active' | 'ready';
-
-const STATUS_LABELS: Record<SourceStatusKey, string> = {
-  disabled: 'Disabled',
-  unavailable: 'Unavailable',
-  error: 'Error',
-  active: 'Active',
-  ready: 'Ready',
-};
 
 export function InputSourceStatusCard({
   title,
@@ -21,6 +16,7 @@ export function InputSourceStatusCard({
   source: SourceState;
   onToggle: (enabled: boolean) => void;
 }) {
+  const { t } = useTranslation(['common', 'controls', 'diagnostics', 'source']);
   const status = sourceStatus(source);
   const showLevel = source.enabled && source.available && source.capturing;
   const barPercent = showLevel ? (source.inputLevel ?? 0) : 0;
@@ -49,7 +45,7 @@ export function InputSourceStatusCard({
       {showLevel ? (
         <div className='mt-3'>
           <div className='mb-1.5 flex items-center justify-between text-[10.5px] font-medium text-stone-500'>
-            <span>Input level</span>
+            <span>{t('controls:inputLevel')}</span>
             <span className='tabular-nums'>{barPercent}%</span>
           </div>
           <div className='h-1 rounded-full bg-white/5'>
@@ -63,7 +59,7 @@ export function InputSourceStatusCard({
 
       {showError ? (
         <p className='mt-2.5 text-[12px] leading-5 text-rose-200/90'>
-          {source.detail ?? 'Input unavailable'}
+          {source.detail ? formatUserMessage(source.detail, t) : t('controls:inputUnavailable')}
         </p>
       ) : null}
     </article>
@@ -79,5 +75,13 @@ function sourceStatus(source: SourceState): SourceStatusKey {
 }
 
 function StatusBadge({ value, tone }: { value: SourceStatusKey; tone: BadgeTone }) {
-  return <Badge tone={tone}>{STATUS_LABELS[value]}</Badge>;
+  const { t } = useTranslation('common');
+  const labels: Record<SourceStatusKey, string> = {
+    disabled: t('disabled'),
+    unavailable: t('unavailable'),
+    error: t('error'),
+    active: t('active'),
+    ready: t('ready'),
+  };
+  return <Badge tone={tone}>{labels[value]}</Badge>;
 }

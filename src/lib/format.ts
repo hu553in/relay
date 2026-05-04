@@ -22,11 +22,18 @@ export function formatTime(timestampMs: number): string {
   });
 }
 
-export function formatPercent(value: number | null | undefined, fallback = 'Unavailable'): string {
+export function formatPercent(
+  value: number | null | undefined,
+  fallback: string,
+  language: string
+): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     return fallback;
   }
-  return `${value.toFixed(0)}%`;
+  return new Intl.NumberFormat(language, {
+    maximumFractionDigits: 0,
+    style: 'percent',
+  }).format(value / 100);
 }
 
 interface ByteFormatOptions {
@@ -51,13 +58,14 @@ export function formatByteSize(
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-export function formatMemoryCompact(value: number | null | undefined): string {
-  return formatByteSize(value, { fallback: 'Unavailable', detail: 'compact' });
+export function formatMemoryCompact(value: number | null | undefined, fallback: string): string {
+  return formatByteSize(value, { fallback, detail: 'compact' });
 }
 
 export function formatMemoryPair(
   used: number | null | undefined,
-  total: number | null | undefined
+  total: number | null | undefined,
+  fallback: string
 ): string {
   if (
     typeof used !== 'number' ||
@@ -66,36 +74,74 @@ export function formatMemoryPair(
     !Number.isFinite(total) ||
     total <= 0
   ) {
-    return 'Unavailable';
+    return fallback;
   }
-  return `${formatMemoryCompact(used)} / ${formatMemoryCompact(total)}`;
+  return `${formatMemoryCompact(used, fallback)} / ${formatMemoryCompact(total, fallback)}`;
 }
 
-export function formatModelSize(value: number | null | undefined): string {
-  return formatByteSize(value, { fallback: 'Unknown size', detail: 'detailed' });
+export function formatModelSize(value: number | null | undefined, fallback: string): string {
+  return formatByteSize(value, { fallback, detail: 'detailed' });
 }
 
-export function listeningStateLabel(state: ListeningState): string {
+export interface ListeningStateLabels {
+  error: string;
+  idle: string;
+  listening: string;
+  starting: string;
+}
+
+export function listeningStateLabel(state: ListeningState, labels: ListeningStateLabels): string {
   switch (state) {
     case 'listening':
-      return 'Listening';
+      return labels.listening;
     case 'error':
-      return 'Error';
+      return labels.error;
     case 'starting':
-      return 'Starting';
+      return labels.starting;
     default:
-      return 'Idle';
+      return labels.idle;
   }
 }
 
-export function formatRelayCpu(metrics: SystemMetrics | null): string {
+export type TranslateFn = (key: string, options?: Record<string, unknown>) => string;
+
+export function listeningStateLabels(
+  t: (key: string, options?: Record<string, unknown>) => string
+): ListeningStateLabels {
+  return {
+    error: t('common:error'),
+    idle: t('common:idle'),
+    listening: t('listening:listening'),
+    starting: t('listening:starting'),
+  };
+}
+
+export function formatRelayCpu(
+  metrics: SystemMetrics | null,
+  fallback: string,
+  language: string
+): string {
   if (
     !metrics ||
     typeof metrics.processCpuUsage !== 'number' ||
     !Number.isFinite(metrics.processCpuUsage)
   ) {
-    return 'Unavailable';
+    return fallback;
   }
   const divisor = Math.max(1, metrics.cpuLogicalCores);
-  return `${Math.min(100, metrics.processCpuUsage / divisor).toFixed(0)}%`;
+  return formatPercent(Math.min(100, metrics.processCpuUsage / divisor), fallback, language);
+}
+
+export function formatTemperatureC(
+  value: number | null | undefined,
+  fallback: string,
+  language: string
+): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+  const formatted = new Intl.NumberFormat(language, {
+    maximumFractionDigits: 0,
+  }).format(value);
+  return `${formatted} ℃`;
 }

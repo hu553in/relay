@@ -1,14 +1,9 @@
 import { Download } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/shared/Badge';
 import { formatModelSize } from '@/lib/format';
 import type { ModelKind, ModelRecord, ModelState } from '@/lib/types';
-
-const MODEL_STATE_LABELS: Record<ModelState, string> = {
-  active: 'Active',
-  available: 'Available',
-  missing: 'Missing',
-};
 
 const MODEL_STATE_ORDER: Record<ModelState, number> = {
   active: 0,
@@ -38,10 +33,9 @@ export function ModelsList({
   onDownload: (kind: ModelKind) => Promise<void>;
   downloading: boolean;
 }) {
+  const { t } = useTranslation(['models']);
   if (models.length === 0) {
-    return (
-      <EmptyState text='No local models discovered yet. Point Relay at a models directory first.' />
-    );
+    return <EmptyState text={t('models:empty')} />;
   }
 
   return (
@@ -61,14 +55,16 @@ export function ModelsList({
             <div className='flex shrink-0 items-center gap-1.5'>
               {model.recommended ? (
                 <Badge tone='warning' className='text-[10px]'>
-                  Recommended
+                  {t('models:recommended')}
                 </Badge>
               ) : null}
               <ModelStateBadge state={model.state} />
             </div>
           </div>
           <div className='mt-2 flex items-center justify-between gap-3'>
-            <span className='text-[10.5px] text-stone-500'>{formatModelSize(model.sizeBytes)}</span>
+            <span className='text-[10.5px] text-stone-500'>
+              {formatModelSize(model.sizeBytes, t('models:unknownSize'))}
+            </span>
             {model.state !== 'active' && model.recommended && model.state === 'missing' ? (
               <button
                 type='button'
@@ -77,7 +73,7 @@ export function ModelsList({
                 className='inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/4 px-3 py-1.5 text-[12px] font-medium text-stone-100 transition hover:border-white/14 hover:bg-white/10 disabled:opacity-45'
               >
                 <Download size={13} />
-                {downloading ? 'Downloading...' : 'Download model'}
+                {downloading ? t('models:downloading') : t('models:download')}
               </button>
             ) : model.state !== 'active' ? (
               <button
@@ -86,7 +82,7 @@ export function ModelsList({
                 disabled={model.state === 'missing'}
                 className='rounded-lg border border-white/10 bg-white/4 px-3 py-1.5 text-[12px] font-medium text-stone-100 transition hover:border-white/14 hover:bg-white/10 disabled:opacity-40'
               >
-                Use model
+                {t('models:use')}
               </button>
             ) : null}
           </div>
@@ -97,10 +93,16 @@ export function ModelsList({
 }
 
 function ModelStateBadge({ state }: { state: ModelRecord['state'] }) {
+  const { t } = useTranslation('models');
+  const labels: Record<ModelState, string> = {
+    active: t('active'),
+    available: t('available'),
+    missing: t('missing'),
+  };
   const tone = state === 'active' ? 'success' : state === 'missing' ? 'danger' : 'neutral';
   return (
     <Badge tone={tone} className='text-[10px]'>
-      {MODEL_STATE_LABELS[state]}
+      {labels[state]}
     </Badge>
   );
 }

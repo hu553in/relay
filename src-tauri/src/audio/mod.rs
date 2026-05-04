@@ -5,7 +5,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig, SupportedStreamConfig};
 use tokio::sync::mpsc;
 
-use crate::domain::{InputSource, SourceCapability};
+use crate::domain::{InputSource, SourceCapability, UserMessage};
 
 mod system;
 
@@ -26,7 +26,7 @@ pub(crate) struct MicrophoneInputHandle {
 impl MicrophoneInputHandle {
     pub(crate) fn start(
         tx: mpsc::Sender<RawAudioChunk>,
-        on_error: Arc<dyn Fn(InputSource, String) + Send + Sync>,
+        on_error: Arc<dyn Fn(InputSource, UserMessage) + Send + Sync>,
     ) -> Result<Self> {
         let host = cpal::default_host();
         let device = host
@@ -44,14 +44,14 @@ impl MicrophoneInputHandle {
 pub(crate) fn microphone_capability() -> SourceCapability {
     let host = cpal::default_host();
     let Some(device) = host.default_input_device() else {
-        return SourceCapability::unavailable("No input device is available");
+        return SourceCapability::unavailable(UserMessage::new("source:microphoneUnavailable"));
     };
 
     match device.default_input_config() {
-        Ok(_) => SourceCapability::available("Ready to capture the default input device"),
-        Err(error) => {
-            SourceCapability::unavailable(format!("Default input device is unavailable: {error}"))
-        }
+        Ok(_) => SourceCapability::available(UserMessage::new("source:readyDefaultInputDevice")),
+        Err(error) => SourceCapability::unavailable(
+            UserMessage::new("source:defaultInputDeviceUnavailable").param("error", error),
+        ),
     }
 }
 
@@ -64,13 +64,17 @@ pub(super) fn build_stream(
     device: Device,
     config: SupportedStreamConfig,
     tx: mpsc::Sender<RawAudioChunk>,
-    on_error: Arc<dyn Fn(InputSource, String) + Send + Sync>,
+    on_error: Arc<dyn Fn(InputSource, UserMessage) + Send + Sync>,
 ) -> Result<Stream> {
     let channels = config.channels() as usize;
     let sample_rate = config.sample_rate();
     let source_label = match source {
         InputSource::Microphone => "Microphone",
         InputSource::SystemAudio => "System audio",
+    };
+    let error_code = match source {
+        InputSource::Microphone => "diagnostics:microphoneStreamFailed",
+        InputSource::SystemAudio => "diagnostics:systemAudioStreamFailed",
     };
     let stream_config: StreamConfig = config.clone().into();
     // Each branch is structurally identical: capture samples → fold to mono
@@ -96,7 +100,9 @@ pub(super) fn build_stream(
                         };
                         let _ = tx.try_send(chunk);
                     },
-                    move |error| on_error(source, format!("{source_label} stream failed: {error}")),
+                    move |error| {
+                        on_error(source, UserMessage::new(error_code).param("error", error))
+                    },
                     None,
                 )
                 .with_context(|| format!("build {} {source_label} stream", stringify!($ty)))

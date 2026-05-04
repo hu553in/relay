@@ -1,5 +1,6 @@
 import { Copy } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/shared/Badge';
 import { IconButton } from '@/components/shared/IconButton';
@@ -24,7 +25,7 @@ export function SegmentLogPanel({
   live = false,
   footer,
   actions,
-  emptyText = 'Waiting for live segments.',
+  emptyText,
   onCopyError,
 }: {
   title: string;
@@ -37,6 +38,8 @@ export function SegmentLogPanel({
   emptyText?: string;
   onCopyError?: (reason: unknown) => void;
 }) {
+  const { t } = useTranslation(['common', 'logs']);
+  const resolvedEmptyText = emptyText ?? t('logs:emptySegments');
   const { autoFollow, containerRef, handleScroll, jumpToLatest } = useLiveLogScroll(entries.length);
   const hasCopyableEntries = entries.some(entry => entry.text.trim().length > 0);
 
@@ -75,7 +78,7 @@ export function SegmentLogPanel({
                   tone='success'
                   className='text-[10px] font-semibold tracking-(--relay-tracking-wide)'
                 >
-                  Live
+                  {t('common:live')}
                 </Badge>
               ) : null}
             </div>
@@ -84,7 +87,7 @@ export function SegmentLogPanel({
         <div className='flex items-center gap-1.5'>
           {actions}
           <IconButton
-            label='Copy log'
+            label={t('common:copyLog')}
             onClick={() => void copyLog()}
             disabled={!hasCopyableEntries}
             icon={<Copy size={14} />}
@@ -103,7 +106,7 @@ export function SegmentLogPanel({
         >
           {entries.length === 0 ? (
             <div className='grid h-full min-h-32 place-items-center rounded-2xl border border-transparent bg-transparent px-4 py-6 text-center text-[12.5px] text-stone-500'>
-              {emptyText}
+              {resolvedEmptyText}
             </div>
           ) : (
             <div className='grid gap-1.5'>
@@ -120,7 +123,7 @@ export function SegmentLogPanel({
             onClick={jumpToLatest}
             className='absolute bottom-4 right-4 rounded-lg border border-white/12 bg-[rgba(34,34,32,0.94)] px-3 py-1.5 text-[11px] font-medium text-stone-200 shadow-[0_10px_24px_var(--relay-shadow-soft)] transition hover:border-white/16 hover:bg-[rgba(50,50,47,0.96)] hover:text-white'
           >
-            Jump to latest
+            {t('common:jumpToLatest')}
           </button>
         ) : null}
       </div>
@@ -128,8 +131,8 @@ export function SegmentLogPanel({
       <footer className='flex items-center justify-between gap-3 border-t border-white/8 px-4.5 py-2.5 text-[11px] text-stone-500'>
         {footer ?? (
           <div className='flex w-full items-center justify-between gap-3'>
-            <span>{autoFollow ? 'Auto-scroll enabled' : 'Browsing history'}</span>
-            <span>{entries.length} lines</span>
+            <span>{autoFollow ? t('common:autoScrollEnabled') : t('common:browsingHistory')}</span>
+            <span>{t('common:lineCount', { count: entries.length })}</span>
           </div>
         )}
       </footer>

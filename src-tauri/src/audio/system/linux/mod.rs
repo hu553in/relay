@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use tokio::sync::mpsc;
 
 use crate::audio::RawAudioChunk;
-use crate::domain::SourceCapability;
+use crate::domain::{SourceCapability, UserMessage};
 
 use super::{AudioErrorCallback, SystemAudioBackend};
 
@@ -27,7 +27,7 @@ pub(crate) struct SystemAudioInputHandle {
     child: Arc<Mutex<Child>>,
     reader: Option<JoinHandle<()>>,
     stop_requested: StopFlag,
-    detail: &'static str,
+    detail: UserMessage,
 }
 
 impl SystemAudioBackend for SystemAudioInputHandle {
@@ -38,8 +38,8 @@ impl SystemAudioBackend for SystemAudioInputHandle {
         })
     }
 
-    fn detail(&self) -> &'static str {
-        self.detail
+    fn detail(&self) -> UserMessage {
+        self.detail.clone()
     }
 }
 
@@ -51,7 +51,7 @@ impl SystemAudioInputHandle {
         <Self as SystemAudioBackend>::start(tx, on_error)
     }
 
-    pub(crate) fn detail(&self) -> &'static str {
+    pub(crate) fn detail(&self) -> UserMessage {
         <Self as SystemAudioBackend>::detail(self)
     }
 }
@@ -175,7 +175,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(handle.detail(), "Active through PipeWire sink capture");
+        assert_eq!(handle.detail().code, "source:activePipeWire");
         let chunk = rx.blocking_recv().unwrap();
         assert_eq!(chunk.source, InputSource::SystemAudio);
         assert_eq!(chunk.sample_rate, 48_000);
@@ -198,7 +198,10 @@ mod tests {
             tx.clone(),
             Arc::new(|_, _| {}),
         ) {
-            Ok(handle) => panic!("expected PipeWire startup failure, got {}", handle.detail()),
+            Ok(handle) => panic!(
+                "expected PipeWire startup failure, got {}",
+                handle.detail().code
+            ),
             Err(error) => error,
         };
         let handle = start_backend_with_path(
@@ -210,7 +213,7 @@ mod tests {
         .unwrap();
 
         assert!(pipewire_error.to_string().contains("exited early"));
-        assert_eq!(handle.detail(), "Active through PulseAudio default monitor");
+        assert_eq!(handle.detail().code, "source:activePulseAudio");
         let chunk = rx.blocking_recv().unwrap();
         assert_eq!(chunk.source, InputSource::SystemAudio);
         assert_eq!(chunk.samples, vec![0.0, 0.5]);
@@ -231,7 +234,7 @@ mod tests {
         ) {
             Ok(handle) => panic!(
                 "expected PulseAudio startup failure, got {}",
-                handle.detail()
+                handle.detail().code
             ),
             Err(error) => error,
         };

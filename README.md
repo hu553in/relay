@@ -4,40 +4,42 @@
 
 [![CI](https://github.com/hu553in/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in/relay/actions/workflows/ci.yml)
 
-Relay is a desktop utility for live speech transcription and local translation. It listens to microphone
-audio, system audio, or both, transcribes speech with Whisper, translates segments with a local
-llama.cpp-compatible model, and shows the result in a main window and overlay.
+Relay is a desktop app for live speech transcription and local translation.
 
-Relay is developed and tested primarily on macOS, but the codebase is structured as a Tauri 2
-desktop app with platform-specific pieces isolated where practical.
+It can listen to microphone audio, system audio, or both. Speech is transcribed locally with Whisper and
+translated locally with a llama.cpp-compatible GGUF model. Results are shown in the main window and in an
+optional overlay.
+
+Relay is developed primarily for macOS. The app is built with Tauri, React, TypeScript, and Rust. Linux
+and Windows builds exist, but platform audio support may vary.
 
 ## Features
 
-- Menu-bar desktop app with controls, settings, overlay, tray menu, and global shortcuts
-- Microphone capture through `cpal`
-- System audio capture where the platform and runtime support it
-- Local speech-to-text with `whisper-rs` and Whisper GGML `.bin` models
-- Local translation with `llama-cpp-2` and llama.cpp-compatible GGUF chat or instruct models
-- Recursive model discovery from configured model directories
-- Recommended model rows with one-click download into the configured models directory
-- Transcript and translation logs with copy, clear, auto-scroll, and overlay support
+- Live microphone transcription
+- System audio capture where supported
+- Local Whisper transcription with GGML `.bin` models
+- Local translation with llama.cpp-compatible GGUF instruct or chat models
+- Main window, overlay window, tray/menu-bar actions, and global shortcuts
+- Recursive model discovery from configured directories
+- Recommended model rows with one-click download
+- Transcript, translation, and diagnostics logs
 - TOML settings in the user config directory
-- Diagnostics UI and persisted diagnostics logs
 
 ## Limitations
 
-- System audio support is runtime- and device-dependent and degrades gracefully when unavailable.
+- System audio capture depends on the platform, runtime, and selected device.
   - macOS and Windows use the default output-device loopback path exposed through `cpal`.
-  - Linux uses PipeWire first through `pw-record`, then falls back to the PulseAudio default monitor through `parec`.
-- Translation quality and availability depend on the selected GGUF model exposing a usable chat template.
-- There is no hosted translation provider.
-- Release builds are not signed or notarized.
+  - Linux uses `pw-record` first, then falls back to `parec`.
+- Translation quality depends on the selected GGUF model.
+- Translation requires a model with a usable chat template.
+- There is no hosted transcription or translation provider.
+- Release builds are currently not signed or notarized.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    mic["Microphone"] --> audio["Audio capture and chunking"]
+    mic["Microphone"] --> audio["Audio capture"]
     sys["System audio"] --> audio
     audio --> stt["Whisper transcription"]
     stt --> segments["Relay segments"]
@@ -48,79 +50,91 @@ flowchart LR
     segments --> diagnostics["Diagnostics"]
 ```
 
-The backend owns capture, transcription, translation, app state, settings, diagnostics, tray actions,
-and Tauri commands. The frontend receives snapshots and events and renders the main workspace, overlay,
-settings, logs, and toast states.
+The Rust backend owns audio capture, transcription, translation, settings, diagnostics, app state, windows,
+tray/menu actions, and Tauri commands.
+
+The React frontend receives snapshots and events from the backend and renders the main window, overlay,
+settings, logs, and toasts.
 
 ## Requirements
 
-- macOS for the current primary development target.
-- Node.js 25 and `pnpm` 10, matching the CI setup.
-- Rust stable with `rustfmt`, `clippy`, and `cargo-llvm-cov`.
-- Tauri 2 system dependencies for the target platform.
-- Optional Linux system-audio runtime tools:
-  - `pw-record` for PipeWire desktops.
-  - `parec` for older PulseAudio desktops or Pulse-compatible setups.
+- macOS for the primary development target
+- Node.js
+- pnpm
+- Rust with `rustfmt` and `clippy`
+- Tauri 2 system dependencies for the target platform
+- Optional Linux system-audio tools:
+  - `pw-record` from PipeWire
+  - `parec` from PulseAudio tools
 - Local model files:
-  - Whisper GGML `.bin` model for transcription.
-  - llama.cpp-compatible `.gguf` model for translation.
-
-For Linux release builds, CI installs WebKit and AppIndicator dependencies. Local Linux development needs
-the equivalent Tauri Linux dependencies.
+  - Whisper GGML `.bin` model for transcription
+  - llama.cpp-compatible GGUF model for translation
 
 ## Models
 
-Relay creates a default `models` directory next to its config and logs on first startup. Settings can still
-point transcription and translation at custom directories. The model list always shows a recommended row:
-if the exact recommended file is present in the configured directory, the row can be selected; otherwise,
-the row downloads that file into the configured directory and selects it after the download completes.
+Relay creates a default `models` directory near its config and logs on first startup. You can also point
+transcription and translation to custom directories from Settings.
 
-### Transcription models
+Model discovery is recursive. Recommended and selected model names are matched case-insensitively, so a file
+with different casing is still treated as the same model.
 
-Supported transcription models are Whisper GGML `.bin` files compatible with whisper.cpp and whisper-rs.
+Recommended downloads are saved using Relay's configured `relative_path`.
 
-Recommended default: [`ggml-small.bin`](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin).
+### Transcription
 
-Alternatives: [ggerganov/whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp/tree/main).
+Supported files:
+
+- Whisper GGML `.bin`
+
+Recommended default:
+
+- [`ggml-small.bin`](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin)
+
+Alternatives:
+
+- [ggerganov/whisper.cpp models](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
 
 Notes:
 
 - Use multilingual models for mixed or non-English speech.
-- English-only models, usually named with `.en`, are faster but suitable only for English speech.
-- Relay scans the configured transcription models directory recursively for `.bin` files.
+- English-only models usually have `.en` in the name. They are faster, but suitable only for English speech.
+- Relay scans the configured transcription directory for `.bin` files.
 
-### Translation models
+### Translation
 
-Supported translation models are GGUF files that can be loaded by llama.cpp and expose a usable chat
-template for instruction-style prompting.
+Supported files:
 
-Recommended default: [`Qwen2.5-3B-Instruct-Q5_K_M.gguf`](https://huggingface.co/apto-as/Qwen2.5-3B-Instruct-Q5_K_M-GGUF/resolve/main/qwen2.5-3b-instruct-q5_k_m.gguf).
+- llama.cpp-compatible `.gguf`
 
-Discovery starting point for alternatives: [Hugging Face GGUF translation candidates for llama.cpp](https://huggingface.co/models?pipeline_tag=translation&library=gguf&apps=llama.cpp).
+Recommended default:
 
-The recommended translation model is multilingual and compact enough for the current MVP target, but its
-license is the upstream Qwen model license. Any alternative still needs to load locally, expose a usable
-chat template, fit available memory, and produce acceptable translation output.
+- [`Qwen2.5-3B-Instruct-Q5_K_M.gguf`](https://huggingface.co/apto-as/Qwen2.5-3B-Instruct-Q5_K_M-GGUF/resolve/main/qwen2.5-3b-instruct-q5_k_m.gguf)
 
-Relay scans the configured translation models directory recursively for `.gguf` files.
+Discovery starting point:
+
+- [Hugging Face GGUF translation candidates for llama.cpp](https://huggingface.co/models?pipeline_tag=translation&library=gguf&apps=llama.cpp)
+
+The recommended translation model is multilingual and compact enough for the current MVP target. Its license
+comes from the upstream Qwen model and repository.
+
+Any alternative model still needs to:
+
+- load locally through llama.cpp
+- expose a usable chat template
+- fit available memory
+- produce acceptable translation output
+
+Relay scans the configured translation directory for `.gguf` files.
 
 ## Configuration
 
-Relay stores settings as TOML:
+Relay stores settings as TOML.
+
+Default macOS paths:
 
 ```text
 ~/Library/Application Support/Relay/settings.toml
-```
-
-The diagnostics log is stored at:
-
-```text
 ~/Library/Application Support/Relay/logs/diagnostics.log
-```
-
-The default model directory is stored at:
-
-```text
 ~/Library/Application Support/Relay/models
 ```
 
@@ -157,26 +171,102 @@ toggle_overlay = "CmdOrCtrl+Shift+O"
 ```
 
 Settings can be edited through the Settings window. The Raw config tab shows a read-only preview of the
-persisted TOML. Shortcut text fields validate on save and active global shortcuts are re-registered after
-settings are saved.
+persisted TOML.
 
-Model matching is case-insensitive for recommended and selected model names, so a file already present
-with different casing is treated as the same model instead of creating duplicate recommended rows.
-Recommended downloads are saved using Relay's configured `relative_path`, not by guessing from the URL.
+Shortcut fields are validated on save. Active global shortcuts are re-registered after settings are saved.
 
-Transcription tuning:
+## Tuning
 
-- `threads`: CPU threads used by Whisper.
-- `window_seconds`: seconds of audio per Whisper decode. Lower reduces latency; higher gives more context.
-- `hop_seconds`: seconds between overlapping decodes. Lower updates more often and costs more CPU.
-- `sentence_timeout_ms`: max time to hold a partial sentence before emitting it.
+Transcription settings:
 
-Translation tuning:
+- `threads`: CPU threads used by Whisper
+- `window_seconds`: seconds of audio per Whisper decode
+- `hop_seconds`: seconds between overlapping decodes
+- `sentence_timeout_ms`: max time to hold a partial sentence before emitting it
 
-- `target_language`: ISO code like `de` / `ja`, or a plain custom language name.
-- `max_tokens`: max generated tokens per translated segment.
-- `context_tokens`: llama.cpp context window. Higher fits longer prompts and outputs but uses more memory.
-- `threads`: CPU threads used by llama.cpp translation.
+Translation settings:
+
+- `target_language`: ISO code like `de` or `ja`, or a custom language name
+- `max_tokens`: max generated tokens per translated segment
+- `context_tokens`: llama.cpp context window
+- `threads`: CPU threads used by llama.cpp translation
+
+Lower transcription windows and hops reduce latency, but increase CPU load. Higher context size can help with
+longer translation prompts and outputs, but uses more memory.
+
+## UI
+
+Relay has three main windows:
+
+- Main window: input toggles, transcript log, translation log, and optional stats view
+- Overlay window: always-on-top live transcript and translation view
+- Settings window: inputs, transcription, translation, interface, overlay, shortcuts, logs, raw config, and about
+
+The tray/menu-bar menu exposes quick actions for listening, overlay visibility, controls, settings, about,
+and quit.
+
+## Diagnostics
+
+Diagnostics are shown in Settings and appended to `diagnostics.log`.
+
+Clearing diagnostics clears the in-memory UI log and truncates the log file without deleting it.
+
+Common diagnostic cases:
+
+- missing or invalid Whisper model
+- missing or invalid translation model
+- input device unavailable
+- system audio unavailable
+- translation failure
+- shortcut validation warning
+
+## Troubleshooting
+
+### Start listening is disabled
+
+Choose a valid Whisper `.bin` model in Settings -> Transcription.
+
+Listening requires a valid transcription model.
+
+### Translation does not run
+
+Choose a valid `.gguf` model in Settings -> Translation.
+
+Listening can run without translation, but translated output remains unavailable until the translation model
+is valid.
+
+### Translation fails for a selected model
+
+Check that the model:
+
+- is a GGUF file supported by llama.cpp
+- has a usable chat template
+- fits local memory
+- works as an instruct or chat model
+
+### No microphone input
+
+Check macOS microphone permissions and make sure a default input device exists.
+
+### System audio is unavailable
+
+System audio capture depends on platform support and the current output-device path.
+
+Relay should continue in microphone-only mode when system audio is unavailable.
+
+On Linux, make sure `pw-record` or `parec` is installed and available in `PATH`.
+
+On Debian/Ubuntu:
+
+```bash
+sudo apt install pipewire-bin pulseaudio-utils
+```
+
+On Windows or macOS, make sure a default output device exists and the OS/runtime exposes loopback capture for it.
+
+### Logs do not appear
+
+Open Settings -> Logs and use the reveal action to show `diagnostics.log` in the system file manager.
 
 ## Development
 
@@ -192,93 +282,27 @@ pnpm build
 pnpm tauri build
 ```
 
-`pnpm check` runs frontend lint/typecheck/unit tests plus Rust fmt/check/clippy. Rust tests are separate so
-local checks and CI can report static failures independently from backend runtime tests. GitHub Actions
-runs Rust tests in a matrix across Ubuntu 22.04, Ubuntu 24.04, macOS, and Windows.
+`pnpm check` runs frontend checks and Rust static checks. Backend tests are available separately through
+`pnpm test:backend`.
+
+GitHub Actions run checks and build release artifacts for macOS, Linux, and Windows release jobs.
 
 ## Project structure
 
-- `src-tauri/src/app`: application state, lifecycle, windows, diagnostics, model discovery, and runtime
-  health.
-- `src-tauri/src/audio`: microphone and system-audio capture abstractions and raw audio chunks.
-  System-audio backends live under `src-tauri/src/audio/system`.
-- `src-tauri/src/pipeline`: listening pipeline orchestration, chunking, transcription, and translation
-  flow.
-- `src-tauri/src/transcription`: `whisper-rs` model loading and transcription.
-- `src-tauri/src/translation`: llama.cpp translation provider and health checks.
-- `src-tauri/src/settings`: TOML persistence and config path handling.
-- `src-tauri/src/recommended_models`: hardcoded recommended model metadata used by discovery and download.
-- `src-tauri/src/commands`: Tauri command boundary.
-- `src-tauri/src/platform`: platform-specific code.
-- `src`: React + TypeScript frontend.
-- `src/components`: main window, overlay, settings, shared UI, logs, and toast components.
-- `src/hooks`: Tauri event subscriptions, live-log scroll behavior, and toast state.
-- `src/lib`: typed frontend API wrappers, formatting, diagnostics, and segment utilities.
-
-## UI overview
-
-Relay has three main windows:
-
-- Main window: live workspace. The default mode shows input toggles and transcript and translation logs.
-  Stats mode replaces the live workspace with session, system, and model health stats.
-- Overlay window: transparent, always-on-top live transcript and translation view.
-- Settings window: inputs, transcription, translation, overlay, shortcuts, diagnostics logs, raw config,
-  and about information.
-
-The tray or menu bar menu exposes quick actions for listening, overlay visibility, controls, settings,
-about, and quit.
-
-## Diagnostics
-
-Diagnostics are visible in Settings and are appended to `diagnostics.log`. Clearing diagnostics clears both
-the in-memory UI log and truncates the file without deleting it.
-
-Useful diagnostic states include:
-
-- missing or invalid Whisper model
-- missing or invalid translation model
-- input device unavailable
-- system audio unavailable
-- translation failures
-- shortcut validation warnings
-
-## Troubleshooting
-
-### Start listening is disabled
-
-Choose a valid Whisper `.bin` model in Settings -> Transcription. Listening requires a valid transcription
-model.
-
-### Translation does not run
-
-Choose a valid `.gguf` model in Settings -> Translation. Listening can still run without translation, but
-translated output remains unavailable until the translation model is valid.
-
-### Translation fails for a selected model
-
-Confirm that the model:
-
-- is a GGUF file supported by llama.cpp
-- has a usable chat template
-- fits local memory
-- behaves as an instruction or chat model
-
-### No microphone input
-
-Check macOS microphone permissions and confirm a default input device exists.
-
-### System audio is unavailable
-
-System audio capture depends on the current platform, runtime, and device path. Relay should continue in
-microphone-only mode when system audio is unavailable.
-
-On Linux, make sure `pw-record` or `parec` is installed and executable in `PATH`; on Debian/Ubuntu,
-those tools are provided by `pipewire-bin` and `pulseaudio-utils`. On Windows or macOS, make sure a
-default output device is present and the OS/runtime exposes loopback capture for it.
-
-### Logs do not appear
-
-Open Settings -> Logs. Use the reveal action to show `diagnostics.log` in the system file manager.
+- `src-tauri/src/app`: app state, lifecycle, windows, diagnostics, model discovery, and runtime health
+- `src-tauri/src/audio`: microphone and system-audio capture
+- `src-tauri/src/audio/system`: platform-specific system-audio backends
+- `src-tauri/src/pipeline`: listening pipeline, chunking, transcription, and translation flow
+- `src-tauri/src/transcription`: Whisper model loading and transcription
+- `src-tauri/src/translation`: llama.cpp translation provider and health checks
+- `src-tauri/src/settings`: TOML persistence and config paths
+- `src-tauri/src/recommended_models`: recommended model metadata
+- `src-tauri/src/commands`: Tauri commands
+- `src-tauri/src/platform`: platform-specific code
+- `src`: React and TypeScript frontend
+- `src/components`: main window, overlay, settings, shared UI, logs, and toasts
+- `src/hooks`: Tauri subscriptions, live-log scroll behavior, and toast state
+- `src/lib`: frontend API wrappers, formatting, diagnostics, and segment utilities
 
 ## Release
 
@@ -291,4 +315,4 @@ pnpm release:major
 ```
 
 The release config bumps `package.json` and `src-tauri/Cargo.toml`, creates a tag, and pushes it.
-GitHub Actions then run checks and build Tauri artifacts for macOS, Linux, and Windows release jobs.
+GitHub Actions then run checks and build Tauri artifacts.

@@ -14,7 +14,7 @@ use crate::constants::{EVENT_SETTINGS_NAVIGATE, EVENT_SNAPSHOT};
 use crate::domain::{
     AppPaths, AppSnapshot, DiagnosticsEntry, ListeningState, ModelKind, RelaySettings,
     SegmentRecord, SegmentStatus, ServiceHealth, SourceCapability, SourceState, SystemMetrics,
-    TemperatureReading,
+    TemperatureReading, UserMessage,
 };
 use crate::models::{collect_models, download_recommended_model_file, validate_model_directory};
 use crate::pipeline::{start_pipeline, PipelineHandle};
@@ -155,7 +155,8 @@ impl RelayApp {
             {
                 self.push_diagnostic(
                     "warning",
-                    format!("Global shortcuts saved but could not be registered: {error:#}"),
+                    UserMessage::new("diagnostics:globalShortcutsRegisterFailed")
+                        .param("error", format!("{error:#}")),
                 )?;
             }
         }
@@ -168,15 +169,13 @@ impl RelayApp {
             if !snapshot.has_available_input() || !snapshot.stt_is_ready() {
                 self.push_diagnostic(
                     "warning",
-                    "Settings changed. Listening stopped because the new input or transcription configuration is not ready.",
+                    UserMessage::new("diagnostics:stoppedAfterSettings"),
                 )?;
                 self.stop_listening()?;
                 return self.snapshot_result();
             }
 
-            self.restart_listening(
-                "Settings changed. Restarting audio pipeline with the new configuration.",
-            )?;
+            self.restart_listening(UserMessage::new("diagnostics:restartAfterSettings"))?;
         }
 
         self.snapshot_result()
@@ -227,17 +226,11 @@ impl RelayApp {
 
         match blocker {
             Some(StartBlocker::NoInput) => {
-                self.push_diagnostic(
-                    "warning",
-                    "Enable an available microphone or system audio source before starting listening.",
-                )?;
+                self.push_diagnostic("warning", UserMessage::new("diagnostics:noInput"))?;
                 return Ok(());
             }
             Some(StartBlocker::SttUnavailable) => {
-                self.push_diagnostic(
-                    "warning",
-                    "Choose a valid Whisper model before starting listening.",
-                )?;
+                self.push_diagnostic("warning", UserMessage::new("diagnostics:sttUnavailable"))?;
                 return Ok(());
             }
             Some(StartBlocker::AlreadyActive) => return Ok(()),
@@ -279,7 +272,7 @@ impl RelayApp {
             handle.stop();
         }
         self.emit_snapshot()?;
-        self.push_diagnostic("info", "Listening stopped")?;
+        self.push_diagnostic("info", UserMessage::new("diagnostics:listeningStopped"))?;
 
         Ok(())
     }
@@ -457,13 +450,17 @@ impl RelayApp {
             model_dir
         };
 
-        self.push_diagnostic("info", format!("Downloading recommended {kind:?} model"))?;
+        self.push_diagnostic(
+            "info",
+            UserMessage::new(recommended_code(kind, "diagnostics:recommendedDownload")),
+        )?;
         let path = match download_recommended_model_file(&model_dir, kind).await {
             Ok(path) => path,
             Err(error) => {
                 let _ = self.push_diagnostic(
                     "error",
-                    format!("Recommended {kind:?} model download failed: {error:#}"),
+                    UserMessage::new(recommended_code(kind, "diagnostics:recommendedFailed"))
+                        .param("error", format!("{error:#}")),
                 );
                 return Err(error);
             }
@@ -477,10 +474,11 @@ impl RelayApp {
                 if Path::new(next_settings.stt_model_path.trim()) != model_dir {
                     self.push_diagnostic(
                         "warning",
-                        format!(
-                            "Recommended {kind:?} model downloaded to {}, but the configured directory changed before selection.",
-                            path.display()
-                        ),
+                        UserMessage::new(recommended_code(
+                            kind,
+                            "diagnostics:recommendedDirectoryChanged",
+                        ))
+                        .param("path", path.display()),
                     )?;
                     return self.snapshot_result();
                 }
@@ -491,10 +489,11 @@ impl RelayApp {
                 if Path::new(next_settings.translation.model_path.trim()) != model_dir {
                     self.push_diagnostic(
                         "warning",
-                        format!(
-                            "Recommended {kind:?} model downloaded to {}, but the configured directory changed before selection.",
-                            path.display()
-                        ),
+                        UserMessage::new(recommended_code(
+                            kind,
+                            "diagnostics:recommendedDirectoryChanged",
+                        ))
+                        .param("path", path.display()),
                     )?;
                     return self.snapshot_result();
                 }
@@ -506,7 +505,8 @@ impl RelayApp {
         self.update_settings(next_settings)?;
         self.push_diagnostic(
             "info",
-            format!("Recommended {kind:?} model is ready at {}", path.display()),
+            UserMessage::new(recommended_code(kind, "diagnostics:recommendedReady"))
+                .param("path", path.display()),
         )?;
         self.snapshot_result()
     }
@@ -559,14 +559,19 @@ impl RelayApp {
                         {
                             let segment = &mut guard.snapshot.segments[index];
                             segment.status = SegmentStatus::TranslationFailed;
-                            segment.translation = Some("Translation failed".to_string());
+                            segment.translation = None;
                         }
                         guard.snapshot.translation_health = ServiceHealth::Degraded;
-                        guard.snapshot.translation_detail = Some(error.clone());
+                        guard.snapshot.translation_detail = Some(
+                            UserMessage::new("diagnostics:translationFailed")
+                                .param("error", &error),
+                        );
                         guard.snapshot.session_translation_failure_count += 1;
 
-                        let entry =
-                            diagnostic_entry("error", format!("Translation failed: {error}"));
+                        let entry = diagnostic_entry(
+                            "error",
+                            UserMessage::new("diagnostics:translationFailed").param("error", error),
+                        );
                         add_diagnostic(&mut guard.snapshot, entry.clone());
                         diagnostic = Some(entry);
                     }
@@ -582,7 +587,7 @@ impl RelayApp {
     pub(crate) fn push_diagnostic(
         &self,
         level: impl Into<String>,
-        message: impl Into<String>,
+        message: UserMessage,
     ) -> Result<()> {
         let entry = diagnostic_entry(level, message);
         {
@@ -593,7 +598,11 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    pub(crate) fn update_stt_health(&self, health: ServiceHealth, detail: String) -> Result<()> {
+    pub(crate) fn update_stt_health(
+        &self,
+        health: ServiceHealth,
+        detail: UserMessage,
+    ) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
             guard.snapshot.stt_health = health;
@@ -605,7 +614,7 @@ impl RelayApp {
     pub(crate) fn update_translation_health(
         &self,
         health: ServiceHealth,
-        detail: String,
+        detail: UserMessage,
     ) -> Result<()> {
         {
             let mut guard = self.lock_state()?;
@@ -655,9 +664,8 @@ impl RelayApp {
         &self,
         source: crate::domain::InputSource,
         capturing: bool,
-        detail: impl Into<String>,
+        detail: UserMessage,
     ) -> Result<()> {
-        let detail = detail.into();
         {
             let mut guard = self.lock_state()?;
             let target = match source {
@@ -728,9 +736,8 @@ impl RelayApp {
     pub(crate) fn mark_source_error(
         &self,
         source: crate::domain::InputSource,
-        detail: impl Into<String>,
+        detail: UserMessage,
     ) -> Result<()> {
-        let detail = detail.into();
         {
             let mut guard = self.lock_state()?;
             let target = match source {
@@ -749,7 +756,7 @@ impl RelayApp {
         self.emit_snapshot()
     }
 
-    fn restart_listening(&self, reason: &str) -> Result<()> {
+    fn restart_listening(&self, reason: UserMessage) -> Result<()> {
         if crate::ggml::is_shutting_down() {
             // Mirror `start_listening`: a restart triggered by an in-flight
             // settings change must not race the graceful exit.
@@ -814,7 +821,8 @@ impl RelayApp {
                     if this.is_session_current(session_id) {
                         let _ = this.push_diagnostic(
                             "error",
-                            format!("Failed to start listening: {error:#}"),
+                            UserMessage::new("diagnostics:startFailed")
+                                .param("error", format!("{error:#}")),
                         );
                         let _ = this.set_listening_state(ListeningState::Error, None);
                     }
@@ -845,19 +853,24 @@ impl RelayApp {
                         Ok(()) => {
                             self.update_stt_health(
                                 ServiceHealth::Ready,
-                                format!("Whisper ready with model {}", path.display()),
+                                UserMessage::new("runtime:modelPath")
+                                    .param("path", path.to_string_lossy()),
                             )?;
                             None
                         }
                         Err(error) => {
-                            self.update_stt_health(ServiceHealth::Degraded, error.to_string())?;
+                            self.update_stt_health(
+                                ServiceHealth::Degraded,
+                                UserMessage::new("runtime:whisperModelNotReady")
+                                    .param("error", format!("{error:#}")),
+                            )?;
                             None
                         }
                     }
                 }
                 None => Some((
                     ServiceHealth::Unavailable,
-                    "Choose a Whisper model from the configured directory.".to_string(),
+                    UserMessage::new("runtime:chooseWhisperModel"),
                 )),
             }
         };
@@ -910,7 +923,7 @@ impl RelayApp {
                     "[{}] {} {}",
                     entry.timestamp_ms,
                     entry.level.to_uppercase(),
-                    entry.message
+                    format_user_message_for_file(&entry.message),
                 );
             }
             Err(error) => {
@@ -1029,12 +1042,183 @@ impl SystemProbe {
     }
 }
 
-fn diagnostic_entry(level: impl Into<String>, message: impl Into<String>) -> DiagnosticsEntry {
+fn diagnostic_entry(level: impl Into<String>, message: UserMessage) -> DiagnosticsEntry {
     DiagnosticsEntry {
         id: Uuid::new_v4(),
         timestamp_ms: crate::now_ms(),
         level: level.into(),
-        message: message.into(),
+        message,
+    }
+}
+
+fn recommended_code(kind: ModelKind, base: &str) -> String {
+    let suffix = match kind {
+        ModelKind::Transcription => "Transcription",
+        ModelKind::Translation => "Translation",
+    };
+    format!("{base}{suffix}")
+}
+
+// Writes a human-readable, non-localized message line into the diagnostics
+// log file. The backend code and escaped params are stable across UI language
+// switches — actual translation happens on the frontend via formatUserMessage.
+fn format_user_message_for_file(message: &UserMessage) -> String {
+    let mut result = message.code.clone();
+    for (key, value) in &message.params {
+        result.push(' ');
+        result.push_str(key);
+        result.push('=');
+        result.push('"');
+        result.push_str(&escape_log_value(value));
+        result.push('"');
+    }
+    result
+}
+
+fn escape_log_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
+#[cfg(test)]
+mod diagnostics_file_format_tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn msg(code: &str, params: BTreeMap<String, String>) -> UserMessage {
+        UserMessage {
+            code: code.into(),
+            params,
+        }
+    }
+
+    #[test]
+    fn escape_log_value_preserves_plain_text() {
+        assert_eq!(escape_log_value("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_log_value_escapes_special_chars() {
+        assert_eq!(escape_log_value("\"\\\n\r\t"), "\\\"\\\\\\n\\r\\t");
+    }
+
+    #[test]
+    fn formats_simple_param() {
+        let mut params = BTreeMap::new();
+        params.insert("kind".into(), "transcription".into());
+        assert_eq!(
+            format_user_message_for_file(&msg("diagnostics:test", params)),
+            r#"diagnostics:test kind="transcription""#
+        );
+    }
+
+    #[test]
+    fn formats_multiple_params_in_btreemap_order() {
+        let mut params = BTreeMap::new();
+        params.insert("error".into(), "timeout".into());
+        params.insert("kind".into(), "transcription".into());
+        assert_eq!(
+            format_user_message_for_file(&msg("diagnostics:test", params)),
+            r#"diagnostics:test error="timeout" kind="transcription""#
+        );
+    }
+
+    #[test]
+    fn escapes_space_in_value() {
+        let mut params = BTreeMap::new();
+        params.insert("error".into(), "something went wrong".into());
+        assert_eq!(
+            format_user_message_for_file(&msg("diagnostics:test", params)),
+            r#"diagnostics:test error="something went wrong""#
+        );
+    }
+
+    #[test]
+    fn escapes_equals_in_value() {
+        let mut params = BTreeMap::new();
+        params.insert("key".into(), "a=b".into());
+        assert_eq!(
+            format_user_message_for_file(&msg("diagnostics:test", params)),
+            r#"diagnostics:test key="a=b""#
+        );
+    }
+
+    #[test]
+    fn escapes_newline_in_value() {
+        let mut params = BTreeMap::new();
+        params.insert("error".into(), "line1\nline2".into());
+        assert_eq!(
+            format_user_message_for_file(&msg("diagnostics:test", params)),
+            r#"diagnostics:test error="line1\nline2""#
+        );
+    }
+
+    #[test]
+    fn escapes_quote_and_backslash() {
+        let mut params = BTreeMap::new();
+        params.insert("path".into(), r#"C:\Users\"name""#.into());
+        assert_eq!(
+            format_user_message_for_file(&msg("diagnostics:test", params)),
+            "diagnostics:test path=\"C:\\\\Users\\\\\\\"name\\\"\""
+        );
+    }
+
+    #[test]
+    fn no_params_is_just_code() {
+        assert_eq!(
+            format_user_message_for_file(&msg("diagnostics:listeningStopped", BTreeMap::new())),
+            "diagnostics:listeningStopped"
+        );
+    }
+}
+
+#[cfg(test)]
+mod recommended_code_tests {
+    use super::recommended_code;
+    use crate::domain::ModelKind;
+
+    #[test]
+    fn generates_all_eight_per_kind_codes() {
+        let pairs = [
+            (ModelKind::Transcription, "diagnostics:recommendedDownload"),
+            (ModelKind::Translation, "diagnostics:recommendedDownload"),
+            (ModelKind::Transcription, "diagnostics:recommendedFailed"),
+            (ModelKind::Translation, "diagnostics:recommendedFailed"),
+            (ModelKind::Transcription, "diagnostics:recommendedReady"),
+            (ModelKind::Translation, "diagnostics:recommendedReady"),
+            (
+                ModelKind::Transcription,
+                "diagnostics:recommendedDirectoryChanged",
+            ),
+            (
+                ModelKind::Translation,
+                "diagnostics:recommendedDirectoryChanged",
+            ),
+        ];
+        let expected = [
+            "diagnostics:recommendedDownloadTranscription",
+            "diagnostics:recommendedDownloadTranslation",
+            "diagnostics:recommendedFailedTranscription",
+            "diagnostics:recommendedFailedTranslation",
+            "diagnostics:recommendedReadyTranscription",
+            "diagnostics:recommendedReadyTranslation",
+            "diagnostics:recommendedDirectoryChangedTranscription",
+            "diagnostics:recommendedDirectoryChangedTranslation",
+        ];
+        for ((kind, base), expected_code) in pairs.into_iter().zip(expected) {
+            assert_eq!(recommended_code(kind, base), expected_code);
+        }
     }
 }
 

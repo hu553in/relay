@@ -1,4 +1,5 @@
 import { useDeferredValue, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { buildSegmentLogs, type SegmentLogs } from '@/lib/segments';
 import type { AppSnapshot, SegmentRecord } from '@/lib/types';
@@ -9,6 +10,7 @@ export function useSegmentLogEntries(
   snapshot: AppSnapshot | null,
   options: { idPrefix: string; maxRows?: number }
 ): SegmentLogs {
+  const { t } = useTranslation('logs');
   const segments = useDeferredValue(snapshot?.segments ?? EMPTY_SEGMENTS);
   const transcriptClearedAtMs = snapshot?.transcriptClearedAtMs ?? null;
   const translationClearedAtMs = snapshot?.translationClearedAtMs ?? null;
@@ -20,8 +22,13 @@ export function useSegmentLogEntries(
         idPrefix,
         transcriptClearedAtMs,
         translationClearedAtMs,
+        text: {
+          translationFailed: t('translationFailed'),
+          translationPending: t('translationPending'),
+          translationUnavailable: t('translationUnavailable'),
+        },
         ...(maxRows === undefined ? {} : { maxRows }),
       }),
-    [segments, transcriptClearedAtMs, translationClearedAtMs, idPrefix, maxRows]
+    [segments, transcriptClearedAtMs, translationClearedAtMs, t, idPrefix, maxRows]
   );
 }

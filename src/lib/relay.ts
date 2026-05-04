@@ -6,6 +6,7 @@ import type {
   AppSnapshot,
   ModelKind,
   RelaySettings,
+  SettingsSection,
   SystemMetrics,
 } from './types';
 
@@ -49,7 +50,7 @@ export function hideSettings() {
   return invoke('hide_settings');
 }
 
-export function showSettingsSection(section: string) {
+export function showSettingsSection(section: SettingsSection) {
   return invoke('show_settings_section', { section });
 }
 

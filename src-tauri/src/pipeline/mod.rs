@@ -13,7 +13,9 @@ use crate::constants::{
     MAX_TRANSCRIPTION_WINDOW_SECONDS, MIN_TRANSCRIPTION_HOP_SECONDS,
     MIN_TRANSCRIPTION_SENTENCE_TIMEOUT_MS, MIN_TRANSCRIPTION_WINDOW_SECONDS,
 };
-use crate::domain::{InputSource, RelaySettings, SegmentRecord, SegmentStatus, ServiceHealth};
+use crate::domain::{
+    InputSource, RelaySettings, SegmentRecord, SegmentStatus, ServiceHealth, UserMessage,
+};
 use crate::transcription::WhisperEngine;
 use crate::translation::{build_provider, TranslationRequest};
 
@@ -95,12 +97,12 @@ pub(crate) async fn start_pipeline(
     let microphone_detail = snapshot
         .microphone
         .detail
-        .unwrap_or_else(|| "Microphone capture is unavailable".to_string());
+        .unwrap_or_else(|| UserMessage::new("source:microphoneUnavailable"));
     let system_audio_available = snapshot.system_audio.available;
     let system_audio_detail = snapshot
         .system_audio
         .detail
-        .unwrap_or_else(|| "System audio capture is unavailable".to_string());
+        .unwrap_or_else(|| UserMessage::new("source:systemAudioUnavailable"));
     let engine = WhisperEngine::new(
         settings
             .selected_stt_model_path()
@@ -116,17 +118,19 @@ pub(crate) async fn start_pipeline(
     if !engine.is_configured() {
         app.update_stt_health(
             ServiceHealth::Degraded,
-            "Whisper model is not configured. Set a local model directory and choose a .bin model in Settings."
-                .to_string(),
+            UserMessage::new("runtime:whisperModelNotConfigured"),
         )?;
         anyhow::bail!("Whisper model is not configured");
     } else if let Err(error) = engine.ensure_ready() {
-        app.update_stt_health(ServiceHealth::Degraded, error.to_string())?;
+        app.update_stt_health(
+            ServiceHealth::Degraded,
+            UserMessage::new("runtime:whisperModelNotReady").param("error", format!("{error:#}")),
+        )?;
         anyhow::bail!("Whisper model is not ready: {error:#}");
     } else {
         app.update_stt_health(
             ServiceHealth::Ready,
-            format!("Whisper ready with model {}", engine.model_path()),
+            UserMessage::new("runtime:modelPath").param("path", engine.model_path()),
         )?;
     }
 
@@ -186,15 +190,18 @@ pub(crate) async fn start_pipeline(
                     Ok(Ok(text)) => text,
                     Ok(Err(error)) => {
                         warn!("stt failed: {error:#}");
-                        let _ = processor_app
-                            .update_stt_health(ServiceHealth::Degraded, error.to_string());
+                        let _ = processor_app.update_stt_health(
+                            ServiceHealth::Degraded,
+                            UserMessage::new("runtime:whisperModelNotReady")
+                                .param("error", format!("{error:#}")),
+                        );
                         continue;
                     }
                     Err(error) => {
                         warn!("stt worker failed: {error:#}");
                         let _ = processor_app.update_stt_health(
                             ServiceHealth::Degraded,
-                            format!("Whisper worker failed: {error}"),
+                            UserMessage::new("runtime:whisperWorkerFailed").param("error", error),
                         );
                         continue;
                     }
@@ -269,15 +276,12 @@ pub(crate) async fn start_pipeline(
     let on_error = {
         let app = Arc::clone(&app);
         let error_session_id = session_id;
-        Arc::new(move |source: InputSource, message: String| {
+        Arc::new(move |source: InputSource, message: UserMessage| {
             if !app.is_session_current(error_session_id) {
                 return;
             }
             let _ = app.push_diagnostic("warning", message);
-            let _ = app.mark_source_error(
-                source,
-                "Audio stream error. Check the selected device and permissions.",
-            );
+            let _ = app.mark_source_error(source, UserMessage::new("source:audioStreamError"));
         })
     };
 
@@ -291,15 +295,18 @@ pub(crate) async fn start_pipeline(
         let _ = app.set_source_runtime(
             InputSource::Microphone,
             true,
-            "Active on the default input device",
+            UserMessage::new("source:activeDefaultInputDevice"),
         );
-        let _ = app.push_diagnostic("info", "Audio: microphone capture started");
+        let _ = app.push_diagnostic(
+            "info",
+            UserMessage::new("diagnostics:audioMicrophoneStarted"),
+        );
         Some(handle)
     } else {
         let _ = app.set_source_runtime(
             InputSource::Microphone,
             false,
-            "Microphone disabled in settings",
+            UserMessage::new("source:microphoneDisabled"),
         );
         None
     };
@@ -314,12 +321,14 @@ pub(crate) async fn start_pipeline(
             Ok(handle) => {
                 ensure_session_current(&app, session_id, "after system audio startup")?;
                 let _ = app.set_source_runtime(InputSource::SystemAudio, true, handle.detail());
-                let _ = app.push_diagnostic("info", "Audio: system output loopback started");
+                let _ =
+                    app.push_diagnostic("info", UserMessage::new("diagnostics:audioSystemStarted"));
                 Some(handle)
             }
             Err(error) => {
                 ensure_session_current(&app, session_id, "after system audio startup")?;
-                let detail = format!("System audio capture failed: {error}");
+                let detail = UserMessage::new("diagnostics:audioCaptureFailed")
+                    .param("error", format!("{error:#}"));
                 let _ = app.set_source_runtime(InputSource::SystemAudio, false, detail.clone());
                 let _ = app.push_diagnostic("warning", detail);
                 None
@@ -329,7 +338,7 @@ pub(crate) async fn start_pipeline(
         let _ = app.set_source_runtime(
             InputSource::SystemAudio,
             false,
-            "System audio disabled in settings",
+            UserMessage::new("source:systemAudioDisabled"),
         );
         None
     };

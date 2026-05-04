@@ -1,17 +1,26 @@
 import type { LogEntry } from '@/components/SegmentLogPanel';
 import type { SegmentRecord } from '@/lib/types';
 
-export function translationText(segment: Pick<SegmentRecord, 'translation' | 'status'>): string {
+export interface SegmentLogText {
+  translationFailed: string;
+  translationPending: string;
+  translationUnavailable: string;
+}
+
+export function translationText(
+  segment: Pick<SegmentRecord, 'translation' | 'status'>,
+  text: SegmentLogText
+): string {
   if (segment.translation) {
     return segment.translation;
   }
   if (segment.status === 'translationFailed') {
-    return 'Translation failed';
+    return text.translationFailed;
   }
   if (segment.status === 'translated' || segment.status === 'transcribed') {
-    return 'Translation unavailable';
+    return text.translationUnavailable;
   }
-  return 'Waiting for translation';
+  return text.translationPending;
 }
 
 function afterClear(segments: SegmentRecord[], clearedAtMs: number | null): SegmentRecord[] {
@@ -33,6 +42,7 @@ export interface BuildSegmentLogsOptions {
   maxRows?: number;
   transcriptClearedAtMs: number | null;
   translationClearedAtMs: number | null;
+  text: SegmentLogText;
 }
 
 export function buildSegmentLogs(
@@ -60,7 +70,7 @@ export function buildSegmentLogs(
     id: `${options.idPrefix}translation-${segment.id}`,
     timestampMs: segment.createdAtMs,
     source: segment.source,
-    text: translationText(segment),
+    text: translationText(segment, options.text),
     status: segment.status,
   }));
 
