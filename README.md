@@ -165,12 +165,15 @@ threads = 8
 visible = true
 always_on_top = true
 
+[interface]
+ui_language = "en"
+
 [shortcuts]
 toggle_listening = "CmdOrCtrl+Shift+L"
 toggle_overlay = "CmdOrCtrl+Shift+O"
 ```
 
-Settings can be edited through the Settings window. The Raw config tab shows a read-only preview of the
+Settings can be edited through the Settings window. The Config tab shows a read-only preview of the
 persisted TOML.
 
 Shortcut fields are validated on save. Active global shortcuts are re-registered after settings are saved.
