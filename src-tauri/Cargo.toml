@@ -18,7 +18,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # Keep `macos-private-api` on the base dependency: tauri-build checks it
 # against `tauri.conf.json` even when Linux CI compiles non-macOS targets.
-tauri = { version = "2.11.0", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "2.11.1", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-opener = "2.5.4"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
