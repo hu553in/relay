@@ -19,7 +19,7 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: read
     steps:
@@ -42,17 +42,42 @@ jobs:
           version: 1.0
       - run: LEFTHOOK_EXCLUDE=cargo-test pnpm check
 
-  test-backend:
+  test-backend-linux:
+    runs-on: self-hosted
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 25
+          cache: 'pnpm'
+      - run: pnpm i --frozen-lockfile
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rust-src-dir: src-tauri
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ${{ env.APT_PACKAGES }}
+          version: 1.0
+      - run: pnpm test:backend
+
+  test-backend-other-platforms:
+    if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - ubuntu-22.04
-          - ubuntu-24.04
-          - macos-latest
-          - windows-latest
+        include:
+          - platform: macos-latest
+            rust_target: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows-latest
+            rust_target: ''
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v6
@@ -67,19 +92,44 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           rust-src-dir: src-tauri
-          target: ${{ matrix.platform == 'macos-latest' &&
-            'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          target: ${{ matrix.rust_target }}
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - if: startsWith(matrix.platform, 'ubuntu-')
-        uses: awalsh128/cache-apt-pkgs-action@latest
+      - run: pnpm test:backend
+
+  release-linux:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: self-hosted
+    needs: [check, test-backend-linux]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 25
+          cache: 'pnpm'
+      - run: pnpm i --frozen-lockfile
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rust-src-dir: src-tauri
+      - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: ${{ env.APT_PACKAGES }}
           version: 1.0
-      - run: pnpm test:backend
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          generateReleaseNotes: true
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: [check, test-backend]
+  release-other-platforms:
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/')
+    needs: [check, test-backend-linux, test-backend-other-platforms]
     permissions:
       contents: write
     strategy:
@@ -87,12 +137,13 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
+            rust_target: aarch64-apple-darwin,x86_64-apple-darwin
             args: '--target aarch64-apple-darwin'
           - platform: macos-latest
+            rust_target: aarch64-apple-darwin,x86_64-apple-darwin
             args: '--target x86_64-apple-darwin'
-          - platform: ubuntu-22.04
-            args: ''
           - platform: windows-latest
+            rust_target: ''
             args: ''
     runs-on: ${{ matrix.platform }}
     steps:
@@ -108,13 +159,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           rust-src-dir: src-tauri
-          target: ${{ matrix.platform == 'macos-latest' &&
-            'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
-      - if: startsWith(matrix.platform, 'ubuntu-')
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: ${{ env.APT_PACKAGES }}
-          version: 1.0
+          target: ${{ matrix.rust_target }}
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

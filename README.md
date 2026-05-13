@@ -2,7 +2,7 @@
 
 > Hear. Relay. Understand.
 
-[![CI](https://github.com/hu553in/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in/relay/actions/workflows/ci.yml)
+[![CI](https://github.com/hu553in-org/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in-org/relay/actions/workflows/ci.yml)
 
 Relay is a desktop app for live speech transcription and local translation.
 
@@ -58,7 +58,6 @@ settings, logs, and toasts.
 
 ## Requirements
 
-- macOS for the primary development target
 - Node.js
 - pnpm
 - Rust with `rustfmt` and `clippy`
@@ -69,6 +68,9 @@ settings, logs, and toasts.
 - Local model files:
   - Whisper GGML `.bin` model for transcription
   - llama.cpp-compatible GGUF model for translation
+
+macOS is the primary development target. Linux and Windows are supported as build targets,
+but audio behavior depends on platform support and available runtime devices.
 
 ## Models
 
@@ -288,7 +290,8 @@ pnpm tauri build
 `pnpm check` runs frontend checks and Rust static checks. Backend tests are available separately through
 `pnpm test:backend`.
 
-GitHub Actions run checks and build release artifacts for macOS, Linux, and Windows release jobs.
+The main CI path runs checks and Linux backend tests on a self-hosted runner. macOS and Windows backend tests
+are manual-only and can be started from the GitHub Actions UI with `workflow_dispatch`.
 
 ## Project structure
 
@@ -318,4 +321,7 @@ pnpm release:major
 ```
 
 The release config bumps `package.json` and `src-tauri/Cargo.toml`, creates a tag, and pushes it.
-GitHub Actions then run checks and build Tauri artifacts.
+
+Pushing a `v*` tag automatically runs checks, Linux backend tests, and the Linux Tauri release build. macOS and
+Windows release builds are manual-only. To build them, open the CI workflow in GitHub Actions, run it manually,
+and select the release tag as the workflow ref.
