@@ -15,7 +15,7 @@ env:
   APT_PACKAGES: >-
     libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev
     libasound2-dev libayatana-appindicator3-dev librsvg2-dev pipewire-bin
-    pulseaudio-utils patchelf
+    pulseaudio-utils patchelf clang libclang-dev
 
 jobs:
   check:
