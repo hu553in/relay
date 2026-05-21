@@ -2,7 +2,7 @@
 
 > Hear. Relay. Understand.
 
-[![CI](https://github.com/hu553in-org/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in-org/relay/actions/workflows/ci.yml)
+[![CI](https://github.com/hu553in/relay/actions/workflows/ci.yml/badge.svg)](https://github.com/hu553in/relay/actions/workflows/ci.yml)
 
 Relay is a desktop app for live speech transcription and local translation.
 
@@ -290,7 +290,7 @@ pnpm tauri build
 `pnpm check` runs frontend checks and Rust static checks. Backend tests are available separately through
 `pnpm test:backend`.
 
-The main CI path runs checks and Linux backend tests on a self-hosted runner. macOS and Windows backend tests
+The main CI path runs checks and Linux backend tests. macOS and Windows backend tests
 are manual-only and can be started from the GitHub Actions UI with `workflow_dispatch`.
 
 ## Project structure
