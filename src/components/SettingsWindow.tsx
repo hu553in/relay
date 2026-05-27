@@ -10,7 +10,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  ContactRound,
   ExternalLink,
   FileCode2,
   FileSearchCorner,
@@ -69,6 +68,9 @@ interface SectionDescriptor {
   icon: ReactNode;
   description: string;
 }
+
+const REPOSITORY_DISPLAY_URL = 'github.com/hu553in/relay';
+const REPOSITORY_URL = `https://${REPOSITORY_DISPLAY_URL}`;
 
 const SECTION_ITEMS: Pick<SectionDescriptor, 'id' | 'icon'>[] = [
   {
@@ -799,12 +801,12 @@ export function SettingsWindow({ relay }: { relay: RelaySnapshotState }) {
               <SectionGrid>
                 <LabeledInfoRow label={t('settings:about.version')} value={version} />
                 <LabeledInfoRow
-                  label={t('settings:about.developer')}
-                  value='Ruslan Khasanshin <r.m.khasanshin@gmail.com>'
+                  label={t('settings:about.repository')}
+                  value={REPOSITORY_DISPLAY_URL}
                   onClick={() => {
-                    void openUrl('mailto:r.m.khasanshin@gmail.com');
+                    void openUrl(REPOSITORY_URL);
                   }}
-                  icon={<ContactRound size={14} />}
+                  icon={<ExternalLink size={14} />}
                 />
                 <LabeledInfoRow
                   label={t('settings:about.website')}

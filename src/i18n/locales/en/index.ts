@@ -178,7 +178,7 @@ export const runtime = {
 
 export const settings = {
   about: {
-    developer: 'Developer',
+    repository: 'GitHub repository',
     version: 'Version',
     website: 'Website',
   },

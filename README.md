@@ -287,11 +287,11 @@ pnpm build
 pnpm tauri build
 ```
 
-`pnpm check` runs frontend checks and Rust static checks. Backend tests are available separately through
-`pnpm test:backend`.
+`pnpm check` runs frontend checks, frontend tests, Rust static checks, and backend coverage tests.
+Backend coverage tests are also available separately through `pnpm test:backend`.
 
-The main CI path runs checks and Linux backend tests. macOS and Windows backend tests
-are manual-only and can be started from the GitHub Actions UI with `workflow_dispatch`.
+CI runs `pnpm check` without backend coverage tests first, then runs backend coverage tests in a
+separate matrix across Ubuntu 22.04, Ubuntu 24.04, macOS, and Windows.
 
 ## Project structure
 
@@ -320,8 +320,7 @@ pnpm release:minor
 pnpm release:major
 ```
 
-The release config bumps `package.json` and `src-tauri/Cargo.toml`, creates a tag, and pushes it.
+The release config bumps `package.json` and `src-tauri/Cargo.toml`, creates a `v*` tag, and pushes it.
 
-Pushing a `v*` tag automatically runs checks, Linux backend tests, and the Linux Tauri release build. macOS and
-Windows release builds are manual-only. To build them, open the CI workflow in GitHub Actions, run it manually,
-and select the release tag as the workflow ref.
+Pushing a `v*` tag runs the full CI path first. After checks and backend coverage tests pass, GitHub Actions
+builds Tauri release artifacts for Linux, macOS Apple silicon, macOS Intel, and Windows.
