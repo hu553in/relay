@@ -36,6 +36,7 @@ jobs:
         with:
           rust-src-dir: src-tauri
           components: rustfmt, clippy
+          cache: false
       - uses: awalsh128/cache-apt-pkgs-action@latest
         with:
           packages: ${{ env.APT_PACKAGES }}
@@ -72,6 +73,7 @@ jobs:
         with:
           rust-src-dir: src-tauri
           target: ${{ matrix.rust_target }}
+          cache: false
       - uses: taiki-e/install-action@cargo-llvm-cov
       - if: startsWith(matrix.platform, 'ubuntu-')
         uses: awalsh128/cache-apt-pkgs-action@latest
@@ -116,6 +118,7 @@ jobs:
         with:
           rust-src-dir: src-tauri
           target: ${{ matrix.rust_target }}
+          cache: false
       - if: startsWith(matrix.platform, 'ubuntu-')
         uses: awalsh128/cache-apt-pkgs-action@latest
         with:

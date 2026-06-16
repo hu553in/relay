@@ -23,6 +23,10 @@ use reader::{read_capture_stdout, StopFlag};
 #[cfg(test)]
 use std::ffi::OsString;
 
+const TEXT_FILE_BUSY_ERROR: i32 = 26;
+const CAPTURE_SPAWN_ATTEMPTS: usize = 3;
+const CAPTURE_SPAWN_RETRY_DELAY: Duration = Duration::from_millis(10);
+
 pub(crate) struct SystemAudioInputHandle {
     child: Arc<Mutex<Child>>,
     reader: Option<JoinHandle<()>>,
@@ -136,18 +140,34 @@ fn start_capture_process(
 }
 
 fn spawn_capture_process(capture: CaptureCommand, program_path: PathBuf) -> Result<Child> {
-    let mut command = capture.command(program_path);
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| format!("start {}", capture.program()))
+    for attempt in 1..=CAPTURE_SPAWN_ATTEMPTS {
+        let mut command = capture.command(program_path.clone());
+        match command
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(child) => return Ok(child),
+            Err(error)
+                if error.raw_os_error() == Some(TEXT_FILE_BUSY_ERROR)
+                    && attempt < CAPTURE_SPAWN_ATTEMPTS =>
+            {
+                thread::sleep(CAPTURE_SPAWN_RETRY_DELAY);
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("start {}", capture.program()))
+            }
+        }
+    }
+
+    unreachable!("capture spawn attempts always return before loop exits")
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -262,10 +282,16 @@ exit 42
     }
 
     fn write_tool(path: PathBuf, body: &str) {
-        fs::write(&path, body).unwrap();
-        let mut permissions = fs::metadata(&path).unwrap().permissions();
+        let temp_path = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
+        let mut file = fs::File::create(&temp_path).unwrap();
+        file.write_all(body.as_bytes()).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+
+        let mut permissions = fs::metadata(&temp_path).unwrap().permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(path, permissions).unwrap();
+        fs::set_permissions(&temp_path, permissions).unwrap();
+        fs::rename(temp_path, path).unwrap();
     }
 
     fn temp_dir(name: &str) -> PathBuf {
