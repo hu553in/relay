@@ -7,11 +7,9 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel};
-use llama_cpp_2::openai::OpenAIChatTemplateParams;
+use llama_cpp_2::model::{AddBos, LlamaChatMessage, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::token::LlamaToken;
-use serde_json::json;
 
 use crate::constants::{
     MAX_GENERATION_TOKENS, MAX_TRANSLATION_CONTEXT_TOKENS, MAX_WORKER_THREADS,
@@ -257,41 +255,22 @@ fn build_translation_prompt(model: &LlamaModel, request: &TranslationRequest) ->
     let template = model
         .chat_template(None)
         .context("translation model does not expose a chat template")?;
-    let messages_json = json!([
-        {
-            "role": "system",
-            "content": format!(
+    let messages = [
+        LlamaChatMessage::new(
+            "system".to_string(),
+            format!(
                 "You are a precise translation engine. Translate the user's spoken transcript into {}. Return only the translated text with no commentary, labels, or quotes.",
                 request.target_language
-            )
-        },
-        {
-            "role": "user",
-            "content": request.text.trim()
-        }
-    ])
-    .to_string();
-    let params = OpenAIChatTemplateParams {
-        messages_json: &messages_json,
-        tools_json: None,
-        tool_choice: None,
-        json_schema: None,
-        grammar: None,
-        reasoning_format: None,
-        chat_template_kwargs: Some("{}"),
-        add_generation_prompt: true,
-        use_jinja: true,
-        parallel_tool_calls: false,
-        enable_thinking: false,
-        add_bos: false,
-        add_eos: false,
-        parse_tool_calls: false,
-    };
+            ),
+        )
+        .context("create translation system message")?,
+        LlamaChatMessage::new("user".to_string(), request.text.trim().to_string())
+            .context("create translation user message")?,
+    ];
 
-    let rendered = model
-        .apply_chat_template_oaicompat(&template, &params)
-        .context("render translation chat template")?;
-    Ok(rendered.prompt)
+    model
+        .apply_chat_template(&template, &messages, true)
+        .context("render translation chat template")
 }
 
 fn generate_translation(
