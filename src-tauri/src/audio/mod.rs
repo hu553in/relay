@@ -76,7 +76,7 @@ pub(super) fn build_stream(
         InputSource::Microphone => "diagnostics:microphoneStreamFailed",
         InputSource::SystemAudio => "diagnostics:systemAudioStreamFailed",
     };
-    let stream_config: StreamConfig = config.clone().into();
+    let stream_config: StreamConfig = config.into();
     // Each branch is structurally identical: capture samples → fold to mono
     // f32 → push into the bounded channel. The duplication is collapsed with a
     // macro because cpal's `build_input_stream` is generic over the sample type
@@ -90,7 +90,7 @@ pub(super) fn build_stream(
             let on_error = on_error.clone();
             device
                 .build_input_stream(
-                    &stream_config,
+                    stream_config,
                     move |data: &[$ty], _| {
                         let chunk = RawAudioChunk {
                             source,
