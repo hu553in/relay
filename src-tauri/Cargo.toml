@@ -1,0 +1,52 @@
+[package]
+name = "relay"
+version = "0.1.0"
+description = "Desktop utility for live speech transcription and local translation."
+authors = ["ruslan.khasanshin"]
+edition = "2021"
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "relay_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Keep `macos-private-api` on the base dependency: tauri-build checks it
+# against `tauri.conf.json` even when Linux CI compiles non-macOS targets.
+tauri = { version = "2.11.2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-opener = "2.5.4"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+toml = "1.1.2"
+anyhow = "1.0.102"
+cpal = "0.18.1"
+dirs = "6.0.0"
+tokio = { version = "1.52.3", features = [
+  "macros",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["fmt", "env-filter"] }
+sysinfo = "0.39.2"
+uuid = { version = "1.23.1", features = ["v4", "serde"] }
+tauri-plugin-dialog = "2.7.1"
+reqwest = "0.13.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { version = "0.1.146", features = ["metal"] }
+whisper-rs = { version = "0.16.0", features = ["metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+llama-cpp-2 = "0.1.145"
+whisper-rs = "0.16.0"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-global-shortcut = "2.3.2"
