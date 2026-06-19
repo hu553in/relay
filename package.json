@@ -18,6 +18,8 @@
     "release:major": "release-it major"
   },
   "dependencies": {
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
     "@headlessui/react": "^2.2.10",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.1",
