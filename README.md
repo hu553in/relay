@@ -13,7 +13,7 @@ and in an optional overlay.
 Relay is developed primarily for macOS. The app is built with Tauri, React, TypeScript, and Rust.
 Linux and Windows builds exist, but platform audio support may vary.
 
-## Features
+## What it does
 
 - Live microphone transcription
 - System audio capture where supported
@@ -283,10 +283,11 @@ manager.
 Useful commands:
 
 ```bash
-pnpm install
+pnpm i
 pnpm tauri dev
 pnpm check
 pnpm check:fix
+pnpm test:frontend
 pnpm test:backend
 pnpm build
 pnpm tauri build
