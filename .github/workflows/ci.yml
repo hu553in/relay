@@ -61,7 +61,7 @@ jobs:
       - run: bun postinstall
       - run: bun vite build
       - run: bun electron-builder ${{ matrix.args }} --publish never
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: relay-build-${{ matrix.target }}
           path: ${{ matrix.path }}
