@@ -1,0 +1,18 @@
+export const IPC_CHANNELS = {
+  audioChunk: 'relay:audio-chunk',
+  clearApiKey: 'relay:clear-api-key',
+  getState: 'relay:get-state',
+  hideOverlay: 'relay:hide-overlay',
+  openRepository: 'relay:open-repository',
+  quit: 'relay:quit',
+  resizeWindow: 'relay:resize-window',
+  saveApiKey: 'relay:save-api-key',
+  saveSettings: 'relay:save-settings',
+  saveTranscripts: 'relay:save-transcripts',
+  showOverlay: 'relay:show-overlay',
+  start: 'relay:start',
+  startCapture: 'relay:start-capture',
+  state: 'relay:state',
+  stop: 'relay:stop',
+  stopCapture: 'relay:stop-capture',
+} as const;

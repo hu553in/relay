@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun ci
+      - run: bun check
+
+  release-build:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: check
+    permissions:
+      contents: read
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            platform: ubuntu-22.04
+            args: --linux --x64
+            path: release/**/*.AppImage
+          - target: mac-arm64
+            platform: macos-latest
+            args: --mac --arm64
+            path: release/**/*.dmg
+          - target: mac-x64
+            platform: macos-latest
+            args: --mac --x64
+            path: release/**/*.dmg
+          - target: win-x64
+            platform: windows-latest
+            args: --win --x64
+            path: release/**/*.exe
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun ci
+      - run: bun postinstall
+      - run: bun vite build
+      - run: bun electron-builder ${{ matrix.args }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-build-${{ matrix.target }}
+          path: ${{ matrix.path }}
+          if-no-files-found: error
+
+  release-publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: release-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: relay-build
+          pattern: relay-build-*
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            relay-build/**/*

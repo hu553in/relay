@@ -1,0 +1,73 @@
+output:
+  - execution
+  - failure
+
+commit-msg:
+  commands:
+    commitlint:
+      run: bunx commitlint --edit {1}
+
+pre-commit:
+  jobs:
+    - name: prettier
+      run: bun prettier -u --write {staged_files}
+      stage_fixed: true
+
+    - name: eslint
+      glob: '*.{ts,tsx,mts,cts}'
+      run: bun eslint --max-warnings=0 --fix {staged_files}
+      stage_fixed: true
+
+    - name: stylelint
+      glob: '**/*.css'
+      run: bun stylelint --max-warnings=0 --fix {staged_files}
+      stage_fixed: true
+
+    - name: typecheck
+      run: bun check:types
+
+    - name: unused
+      # Intentional: knip has no autofix here because removing exports/files automatically is too risky.
+      run: bun check:unused
+
+    - name: vulns
+      run: bun check:vulns
+
+check:
+  jobs:
+    - name: eslint
+      run: bun eslint . --max-warnings=0
+
+    - name: stylelint
+      run: bun stylelint "**/*.css" --max-warnings=0
+
+    - name: typecheck
+      run: bun check:types
+
+    - name: unused
+      # Intentional: knip has no autofix here because removing exports/files automatically is too risky.
+      run: bun check:unused
+
+    - name: vulns
+      run: bun check:vulns
+
+check-fix:
+  jobs:
+    - name: prettier
+      run: bun prettier -u --write .
+
+    - name: eslint
+      run: bun eslint . --max-warnings=0 --fix
+
+    - name: stylelint
+      run: bun stylelint "**/*.css" --max-warnings=0 --fix
+
+    - name: typecheck
+      run: bun check:types
+
+    - name: unused
+      # Intentional: knip has no autofix here because removing exports/files automatically is too risky.
+      run: bun check:unused
+
+    - name: vulns
+      run: bun check:vulns
