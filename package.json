@@ -2,22 +2,29 @@
   "name": "relay",
   "version": "0.1.0",
   "description": "Desktop app for live speech transcription and translated captions through the OpenAI Realtime API.",
+  "author": "Ruslan Khasanshin",
+  "repository": "https://github.com/hu553in/relay",
   "private": true,
-  "author": "hu553in",
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
-    "postinstall": "bun scripts/ensure-electron.ts",
-    "build": "bun postinstall && vite build && electron-builder",
-    "dev": "bun postinstall && vite",
-    "check": "lefthook run check --all-files --force",
-    "check:fix": "lefthook run check-fix --all-files --force",
-    "check:types": "bun tsc --pretty",
+    "dev": "vite",
+    "build": "bun run build:app && bun run build:package",
+    "build:app": "vite build",
+    "build:package": "electron-builder",
+    "lint": "prettier -u -c . && eslint --max-warnings 0 . && stylelint --max-warnings 0 --ignore-path .gitignore '**/*.css'",
+    "lint:fix": "prettier -u -w . && eslint --max-warnings 0 --fix . && stylelint --max-warnings 0 --fix --ignore-path .gitignore '**/*.css'",
+    "check:workflows": "bunx github-actionlint",
+    "check:build": "bun run build:app && bun run build:package --dir --publish never",
+    "check:types": "tsc --pretty",
     "check:unused": "knip",
     "check:vulns": "bun audit --prod --audit-level=high",
-    "prepare": "if [ \"$LEFTHOOK\" = \"0\" ]; then exit 0; fi; bun lefthook install || true",
+    "check": "bun lint && bun check:workflows && bun check:types && bun check:build && bun check:unused && bun check:vulns",
+    "check:fix": "bun lint:fix && bun check",
     "release:patch": "release-it patch",
     "release:minor": "release-it minor",
-    "release:major": "release-it major"
+    "release:major": "release-it major",
+    "prepare": "if [ -n \"${CI:-}\" ] || [ \"${LEFTHOOK:-}\" = \"0\" ]; then exit 0; fi; lefthook install"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -33,8 +40,6 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "^21.2.0",
-    "@commitlint/config-conventional": "^21.2.0",
     "@eslint-react/eslint-plugin": "^5.10.0",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.2",
@@ -49,7 +54,6 @@
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-better-tailwindcss": "^4.6.0",
-    "eslint-plugin-prettier": "^5.5.6",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-doctor": "^0.6.0",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -58,26 +62,22 @@
     "eslint-plugin-simple-import-sort": "^13.0.0",
     "knip": "^6.23.0",
     "lefthook": "^2.1.9",
-    "oxc-parser": "^0.138.0",
     "prettier": "^3.9.4",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "release-it": "^20.2.1",
     "shadcn": "^4.12.0",
     "stylelint": "^17.14.0",
+    "stylelint-config-recommended": "^18.0.0",
     "stylelint-config-tailwindcss": "^1.0.1",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.1",
     "vite": "^8.1.2",
     "vite-plugin-electron": "^1.1.0",
-    "vite-plugin-electron-renderer": "^1.0.0",
-    "yallist": "^5.0.0"
+    "vite-plugin-electron-renderer": "^1.0.0"
   },
   "packageManager": "bun@1.3.14",
   "trustedDependencies": [
-    "electron",
-    "electron-winstaller",
-    "lefthook"
-  ],
-  "main": "dist-electron/main.js"
+    "electron-winstaller"
+  ]
 }

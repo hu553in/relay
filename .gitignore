@@ -1,9 +1,9 @@
 .DS_Store
 Thumbs.db
 node_modules/
-.env
-.env.*
+.env*
 !.env.example
+!.env.example.*
 dist/
 dist-electron/
 out/
@@ -11,5 +11,8 @@ release/
 coverage/
 .vite/
 .vscode/
+.idea/
+*.iml
+*.pem
 *.log
 *.tsbuildinfo

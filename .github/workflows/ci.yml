@@ -7,28 +7,21 @@ on:
     tags:
       - 'v*'
   pull_request:
-    branches:
-      - '**'
   workflow_dispatch:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-      - run: bun ci
-      - run: bun check
+    uses: hu553in/common-things/.github/workflows/check-bun.yml@main
 
   release-build:
     if: startsWith(github.ref, 'refs/tags/')
     needs: check
     permissions:
       contents: read
+      id-token: write
+      attestations: write
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: false
     strategy:
@@ -54,18 +47,23 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
       - run: bun ci
-      - run: bun postinstall
-      - run: bun vite build
-      - run: bun electron-builder ${{ matrix.args }} --publish never
+      - run: bun run build:app
+      - run: bun run build:package ${{ matrix.args }} --publish never
+      - uses: actions/attest@v4
+        with:
+          subject-path: ${{ matrix.path }}
       - uses: actions/upload-artifact@v7
         with:
           name: relay-build-${{ matrix.target }}
           path: ${{ matrix.path }}
           if-no-files-found: error
+          retention-days: 7
 
   release-publish:
     if: startsWith(github.ref, 'refs/tags/')

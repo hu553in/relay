@@ -1,8 +1,8 @@
 import js from '@eslint/js';
 import eslintReact from '@eslint-react/eslint-plugin';
 import { defineConfig, globalIgnores } from 'eslint/config';
+import eslintConfigPrettier from 'eslint-config-prettier/flat';
 import betterTailwind from 'eslint-plugin-better-tailwindcss';
-import prettier from 'eslint-plugin-prettier/recommended';
 import react from 'eslint-plugin-react';
 import reactDoctor from 'eslint-plugin-react-doctor';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -12,7 +12,7 @@ import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import tseslint from 'typescript-eslint';
 
 const eslintConfig = defineConfig([
-  globalIgnores(['dist/**', 'dist-electron/**', 'release/**', 'node_modules/**']),
+  globalIgnores(['dist/**', 'dist-electron/**', 'release/**']),
   {
     extends: [
       js.configs.recommended,
@@ -24,8 +24,8 @@ const eslintConfig = defineConfig([
       reactHooks.configs.flat['recommended-latest'],
       reactYouMightNotNeedAnEffect.configs.strict,
       reactRefresh.configs.vite,
-      prettier,
       betterTailwind.configs['recommended-error'],
+      eslintConfigPrettier,
     ],
     plugins: {
       react,
@@ -72,12 +72,6 @@ const eslintConfig = defineConfig([
     files: ['**/*.{ts,tsx,mts,cts}'],
     rules: {
       'react/self-closing-comp': 'error',
-    },
-  },
-  {
-    files: ['scripts/*.{ts,tsx,mts,cts}'],
-    rules: {
-      'no-console': 'off',
     },
   },
   {
