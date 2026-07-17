@@ -23,8 +23,8 @@ Desktop app for live speech transcription and translated captions through the Op
 
 ## Setup
 
-```sh
-bun ci
+```bash
+bun i
 bun dev
 ```
 
@@ -46,19 +46,28 @@ Relay stores app settings locally. Defaults:
 
 The OpenAI API key is stored separately from normal app settings.
 
+## Runtime behavior
+
+- The renderer captures audio with Web Audio APIs and sends fixed-size PCM16 chunks through IPC
+- The Electron main process owns the Realtime WebSocket session and app state
+- System audio capture uses `getDisplayMedia` and requires platform support for shared audio
+- Captions are kept in app state, rendered in the overlay, and exported through the save dialog
+- Settings cannot be edited while Relay is actively connecting or listening
+
 ## Development
 
-```sh
+```bash
 bun check
 bun check:fix
 bun check:types
+bun check:build
 bun check:unused
 bun check:vulns
 ```
 
 ## Build
 
-```sh
+```bash
 bun run build
 ```
 
@@ -68,35 +77,19 @@ bun run build
 
 Versioning is handled through `release-it`:
 
-```sh
+```bash
 bun release:patch
 bun release:minor
 bun release:major
 ```
 
-The release config prepares the next `package.json` version and pushes a `v*` tag. It does not
-publish npm packages or create the GitHub release directly.
+The release config runs the full check, commits the next `package.json` version, and pushes a
+matching `v*` tag. It does not publish npm packages or create the GitHub release directly.
 
 Release builds run from Git tags matching `v*`. The CI workflow builds Linux, macOS, and Windows
 artifacts and publishes them to the GitHub release.
 
 Release builds are unsigned unless signing credentials are configured outside this repository.
-
-```sh
-bun postinstall
-bun vite build
-bun electron-builder --linux --x64 --publish never
-bun electron-builder --mac --arm64 --publish never
-bun electron-builder --win --x64 --publish never
-```
-
-## Runtime behavior
-
-- The renderer captures audio with Web Audio APIs and sends fixed-size PCM16 chunks through IPC
-- The Electron main process owns the Realtime WebSocket session and app state
-- System audio capture uses `getDisplayMedia` and requires platform support for shared audio
-- Captions are kept in app state, rendered in the overlay, and exported through the save dialog
-- Settings cannot be edited while Relay is actively connecting or listening
 
 ## Tech stack
 

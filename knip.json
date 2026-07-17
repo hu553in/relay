@@ -1,11 +1,5 @@
 {
-  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "$schema": "./node_modules/knip/schema.json",
   "entry": ["electron/main.ts", "electron/preload.ts"],
-  "project": [
-    "src/**/*.{ts,tsx,mts,cts,css}",
-    "electron/**/*.{ts,mts,cts}",
-    "scripts/**/*.{ts,mts,cts}"
-  ],
-  "ignoreBinaries": ["ditto", "powershell.exe"],
-  "ignoreDependencies": ["yallist", "oxc-parser"]
+  "ignoreDependencies": ["@commitlint/cli"]
 }
