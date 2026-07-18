@@ -2,12 +2,16 @@ import { useRelayState } from '@/app/use-relay-state';
 import { ControlPanel } from '@/control/control-panel';
 import { Overlay } from '@/overlay/overlay';
 
+const windowKind =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('window') === 'overlay'
+    ? 'overlay'
+    : 'control';
+
 export function App() {
-  const params = new URLSearchParams(window.location.search);
-  const kind = params.get('window') === 'overlay' ? 'overlay' : 'control';
   const { captureError, clearCaptureError, setState, state } = useRelayState();
 
-  if (kind === 'overlay') {
+  if (windowKind === 'overlay') {
     return <Overlay state={state} />;
   }
 
