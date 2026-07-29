@@ -118,6 +118,9 @@ function clearInactiveError(): void {
 
 function rendererUrl(kind: 'control' | 'overlay'): string {
   if (VITE_DEV_SERVER_URL) {
+    if (!URL.canParse(VITE_DEV_SERVER_URL)) {
+      throw new Error('VITE_DEV_SERVER_URL must be an absolute URL.');
+    }
     const url = new URL(VITE_DEV_SERVER_URL);
     url.searchParams.set('window', kind);
     return url.toString();
