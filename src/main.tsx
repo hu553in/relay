@@ -6,6 +6,10 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { logError } from './shared/log';
 
+function isOverlayWindow(): boolean {
+  return new URLSearchParams(window.location.search).get('window') === 'overlay';
+}
+
 const root = document.getElementById('root');
 
 if (!root) {
@@ -16,7 +20,7 @@ if (!root) {
 try {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
-      <App />
+      <App isOverlay={isOverlayWindow()} />
     </React.StrictMode>
   );
 } catch (reason) {
