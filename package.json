@@ -9,7 +9,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "bun run build:app && bun run build:package",
+    "build": "bun build:app && bun build:package",
     "build:app": "vite build",
     "build:package": "electron-builder",
     "lint": "prettier -u -c . && eslint --max-warnings 0 . && stylelint --max-warnings 0 --ignore-path .gitignore '**/*.css'",
@@ -17,7 +17,7 @@
     "check:hooks": "lefthook validate",
     "check:workflows": "bunx github-actionlint",
     "check:renovate": "bunx --package renovate renovate-config-validator --strict --no-global renovate.json",
-    "check:build": "bun run build:app && bun run build:package --dir --publish never",
+    "check:build": "bun build:app && bun build:package --dir --publish never",
     "check:types": "tsc --pretty",
     "check:unused": "knip",
     "check:vulns": "bun audit --prod --audit-level=high",

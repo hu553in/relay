@@ -53,8 +53,8 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun ci
-      - run: bun run build:app
-      - run: bun run build:package ${{ matrix.args }} --publish never
+      - run: bun build:app
+      - run: bun build:package ${{ matrix.args }} --publish never
       - uses: actions/attest@v4
         with:
           subject-path: ${{ matrix.path }}
