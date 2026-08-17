@@ -17,7 +17,7 @@ Desktop app for live speech transcription and translated captions through the Op
 
 ## Requirements
 
-- Bun 1.3.14
+- Bun
 - OpenAI API key with Realtime API access
 - Desktop runtime supported by Electron
 
@@ -84,9 +84,9 @@ bun release:major
 ```
 
 The release config runs the full check, commits the next `package.json` version, and pushes a
-matching `v*` tag. It does not publish npm packages or create the GitHub release directly.
+matching `vX.Y.Z` tag. It does not publish npm packages or create the GitHub release directly.
 
-Release builds run from Git tags matching `v*`. The CI workflow builds Linux, macOS, and Windows
+Release builds run from Git tags matching `v*.*.*`. The CI workflow builds Linux, macOS, and Windows
 artifacts and publishes them to the GitHub release.
 
 Release builds are unsigned unless signing credentials are configured outside this repository.

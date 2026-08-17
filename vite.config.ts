@@ -9,7 +9,7 @@ export default defineConfig({
   resolve: {
     dedupe: ['react', 'react-dom'],
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      '@': path.resolve(import.meta.dirname, 'src'),
     },
   },
   plugins: [
@@ -27,7 +27,7 @@ export default defineConfig({
         },
       },
       preload: {
-        input: path.join(__dirname, 'electron/preload.ts'),
+        input: path.join(import.meta.dirname, 'electron/preload.ts'),
         vite: {
           build: {
             rollupOptions: {

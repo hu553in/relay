@@ -1,5 +1,5 @@
 {
   "$schema": "./node_modules/knip/schema.json",
   "entry": ["electron/main.ts", "electron/preload.ts"],
-  "ignoreDependencies": ["@commitlint/cli"]
+  "ignoreDependencies": ["@commitlint/cli", "renovate"]
 }
