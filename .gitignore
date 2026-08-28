@@ -9,6 +9,7 @@ dist-electron/
 out/
 release/
 coverage/
+.cache/
 .vite/
 .vscode/
 .idea/
